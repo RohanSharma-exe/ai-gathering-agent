@@ -4,7 +4,36 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from config import ScreenRegions
 from state import Target
+
+
+@dataclass(frozen=True)
+class BoundingBox:
+    """A normalized x/y/width/height rectangle, all values in the 0..1 range."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+    def __post_init__(self) -> None:
+        values = (self.x, self.y, self.width, self.height)
+        if any(value < 0 or value > 1 for value in values):
+            raise ValueError("bounding-box values must be between 0 and 1")
+        if self.x + self.width > 1 or self.y + self.height > 1:
+            raise ValueError("bounding box must remain inside the screen")
+
+    def to_pixels(self, screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+        """Convert to integer x, y, width, height pixels."""
+        if screen_width < 1 or screen_height < 1:
+            raise ValueError("screen dimensions must be positive")
+        return (
+            round(self.x * screen_width),
+            round(self.y * screen_height),
+            round(self.width * screen_width),
+            round(self.height * screen_height),
+        )
 
 
 @dataclass(frozen=True)
@@ -16,6 +45,18 @@ class Observation:
     inventory_percent: float = 0
     mounted: bool = False
     targets: tuple[Target, ...] = ()
+    player_confidence: float = 0
+    mounted_confidence: float = 0
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.inventory_percent <= 100:
+            raise ValueError("inventory_percent must be between 0 and 100")
+        for name, value in (
+            ("player_confidence", self.player_confidence),
+            ("mounted_confidence", self.mounted_confidence),
+        ):
+            if not 0 <= value <= 1:
+                raise ValueError(f"{name} must be between 0 and 1")
 
 
 class ObservationDetector(Protocol):
@@ -23,6 +64,23 @@ class ObservationDetector(Protocol):
 
     def detect(self, image: object) -> Observation:
         ...
+
+
+class LocalPerceptionDetector:
+    """Conservative local detector scaffold.
+
+    It intentionally returns only high-confidence information that it can prove
+    from the current implementation. It does not guess game objects from pixels.
+    A real local detector can later implement this same interface.
+    """
+
+    def __init__(self, regions: ScreenRegions | None = None) -> None:
+        self.regions = regions or ScreenRegions()
+
+    def detect(self, image: object) -> Observation:
+        if not hasattr(image, "size"):
+            raise TypeError("detector expects an image with a size attribute")
+        return Observation()
 
 
 class VisionProvider:
@@ -36,12 +94,7 @@ class VisionProvider:
 
 
 class ScreenshotVisionProvider:
-    """Load screenshots locally and delegate interpretation to a detector.
-
-    The detector is intentionally injected so the project can start with cheap,
-    deterministic CV and later swap in a local object detector without changing
-    the planner/state-machine code. No network or API call is made here.
-    """
+    """Load screenshots locally and delegate interpretation to a detector."""
 
     def __init__(self, screenshot_path: str | Path, detector: ObservationDetector) -> None:
         self._path = Path(screenshot_path)
