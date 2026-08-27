@@ -7,21 +7,71 @@ Albion window. It intentionally performs no mouse/keyboard actions.
 from __future__ import annotations
 
 import argparse
+import ctypes
 from pathlib import Path
 
+from albion_perception import AlbionUIObserver
 from desktop import Desktop
 from observation import UIObservation
 from runtime import ObservationRuntime, RuntimeConfig
 
 
+_observer = AlbionUIObserver()
+
+
+def _albion_client_rect() -> tuple[int, int, int, int] | None:
+    """Return the Albion client-area rectangle on Windows, if visible."""
+    if not hasattr(ctypes, "windll"):
+        return None
+
+    user32 = ctypes.windll.user32
+    hwnd = user32.FindWindowW(None, "Albion Online Client")
+    if not hwnd:
+        return None
+
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
+
+    client = RECT()
+    origin = POINT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(client)):
+        return None
+    if not user32.ClientToScreen(hwnd, ctypes.byref(origin)):
+        return None
+
+    left = origin.x
+    top = origin.y
+    right = left + (client.right - client.left)
+    bottom = top + (client.bottom - client.top)
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
+
+
 def observe_frame(image: object) -> UIObservation:
-    """Return the current conservative observation for one screenshot."""
-    # Perception is intentionally conservative until the Albion UI is calibrated.
-    # Keeping this function separate lets us replace it with the real detector
-    # without changing the runtime or desktop boundary.
-    if not hasattr(image, "size"):
-        raise TypeError("expected a screenshot image")
-    return UIObservation()
+    """Interpret the Albion client portion of one desktop screenshot."""
+    if not hasattr(image, "size") or not hasattr(image, "crop"):
+        raise TypeError("expected a Pillow-compatible screenshot image")
+
+    rect = _albion_client_rect()
+    if rect is not None:
+        left, top, right, bottom = rect
+        screen_width, screen_height = image.size
+        left = max(0, min(left, screen_width - 1))
+        top = max(0, min(top, screen_height - 1))
+        right = max(left + 1, min(right, screen_width))
+        bottom = max(top + 1, min(bottom, screen_height))
+        image = image.crop((left, top, right, bottom))
+
+    return _observer.observe(image)
 
 
 def describe(frame: object) -> None:
