@@ -67,3 +67,44 @@ class LocalFeatureExtractor:
 
         edge_density = edge_hits / comparisons if comparisons else 0.0
         return RegionFeatures(crop.width, crop.height, mean_luminance, edge_density, bright_fraction)
+
+
+@dataclass(frozen=True)
+class FrameChange:
+    """Result of comparing two same-sized screenshots."""
+
+    changed: bool
+    change_score: float
+
+
+class FrameComparator:
+    """Cheap normalized pixel-difference comparator.
+
+    The score is in the 0..1 range and represents the mean RGB difference
+    normalized to the full 8-bit channel range. It is intended as a gate for
+    deeper local perception, not as a semantic understanding of the scene.
+    """
+
+    def __init__(self, threshold: float = 0.05) -> None:
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1")
+        self.threshold = threshold
+
+    def compare(self, previous: object, current: object) -> FrameChange:
+        if not hasattr(previous, "size") or not hasattr(current, "size"):
+            raise TypeError("frames must be Pillow-compatible images")
+        if previous.size != current.size:
+            raise ValueError("frames must have identical dimensions")
+
+        first = previous.convert("RGB")
+        second = current.convert("RGB")
+        pixel_count = first.width * first.height
+        if pixel_count == 0:
+            return FrameChange(changed=False, change_score=0.0)
+
+        total_difference = 0.0
+        for left, right in zip(first.get_flattened_data(), second.get_flattened_data()):
+            total_difference += sum(abs(a - b) for a, b in zip(left, right)) / (3 * 255)
+
+        score = total_difference / pixel_count
+        return FrameChange(changed=score >= self.threshold, change_score=score)
