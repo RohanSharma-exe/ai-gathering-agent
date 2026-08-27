@@ -33,6 +33,7 @@ class LiveControlConfig:
     dismount_key: str | None = "a"
     target_x: float | None = None
     target_y: float | None = None
+    min_perception_confidence: float = 0.9
     save_frames: bool = False
     output_dir: Path = Path("screenshots/live")
 
@@ -41,6 +42,8 @@ class LiveControlConfig:
             raise ValueError("interval_seconds must be positive")
         if self.max_frames is not None and self.max_frames < 1:
             raise ValueError("max_frames must be positive when provided")
+        if not 0 <= self.min_perception_confidence <= 1:
+            raise ValueError("min_perception_confidence must be between 0 and 1")
         for name, value in (("target_x", self.target_x), ("target_y", self.target_y)):
             if value is not None and not 0 <= value <= 1:
                 raise ValueError(f"{name} must be between 0 and 1")
@@ -124,6 +127,9 @@ class LiveControlRuntime:
         return self.source.screenshot(path)
 
     def _action_for_observation(self, observation: Observation, image: object) -> Action | None:
+        if observation.mounted_confidence < self.config.min_perception_confidence:
+            return None
+
         if observation.mounted:
             if not self.config.dismount_key:
                 return None
