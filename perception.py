@@ -43,7 +43,7 @@ class LocalFeatureExtractor:
         height = max(1, min(height, rgb.height - y))
         crop = rgb.crop((x, y, x + width, y + height))
 
-        pixels = list(crop.getdata())
+        pixels = list(crop.get_flattened_data())
         if not pixels:
             return RegionFeatures(crop.width, crop.height, 0.0, 0.0, 0.0)
 
