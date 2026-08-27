@@ -65,6 +65,7 @@ def test_live_runtime_dry_run_never_sends_real_input():
     executor = RecordingExecutor()
     observation = Observation(
         mounted=False,
+        mounted_confidence=1.0,
         targets=(Target(TargetKind.RESOURCE, "fiber", 0.1, 0.5, 0.5),),
     )
 
@@ -102,7 +103,11 @@ def test_live_runtime_stops_on_uncertain_mount_state():
     executor = RecordingExecutor()
     runtime = LiveControlRuntime(
         source,
-        lambda image: Observation(mounted=False, mounted_confidence=0.2),
+        lambda image: Observation(
+            mounted=False,
+            mounted_confidence=0.2,
+            targets=(Target(TargetKind.RESOURCE, "fiber", 0.1, 0.5, 0.5),),
+        ),
         executor,
         Objective("fiber"),
         LiveControlConfig(max_frames=5, dry_run=False),
