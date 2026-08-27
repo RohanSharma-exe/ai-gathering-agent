@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "A small local-first prototype for a visual gathering-agent brain"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pillow>=11.0",
+]
 
 [dependency-groups]
 dev = ["pytest>=9.0"]
