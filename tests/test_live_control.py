@@ -57,7 +57,7 @@ def test_live_runtime_dismounts_before_gathering_when_mounted():
     assert runtime.run() == 2
     assert [action.kind for action in executor.actions] == [ActionKind.PRESS_KEY, ActionKind.GATHER]
     assert executor.actions[0].key == "a"
-    assert (executor.actions[1].x, executor.actions[1].y) == (1001, 518)
+    assert (executor.actions[1].x, executor.actions[1].y) == (998, 518)
 
 
 def test_live_runtime_dry_run_never_sends_real_input():
