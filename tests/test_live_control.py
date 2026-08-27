@@ -97,11 +97,28 @@ def test_live_runtime_stops_when_dismount_key_is_missing():
     assert executor.actions == []
 
 
+def test_live_runtime_stops_on_uncertain_mount_state():
+    source = FakeSource()
+    executor = RecordingExecutor()
+    runtime = LiveControlRuntime(
+        source,
+        lambda image: Observation(mounted=False, mounted_confidence=0.2),
+        executor,
+        Objective("fiber"),
+        LiveControlConfig(max_frames=5, dry_run=False),
+        sleep=lambda _: None,
+    )
+
+    assert runtime.run() == 1
+    assert executor.actions == []
+
+
 def test_live_runtime_stops_after_rejected_action():
     source = FakeSource()
     executor = RecordingExecutor(accepted=False)
     observation = Observation(
         mounted=False,
+        mounted_confidence=1.0,
         targets=(Target(TargetKind.RESOURCE, "fiber", 0.1, 0.5, 0.5),),
     )
     runtime = LiveControlRuntime(
