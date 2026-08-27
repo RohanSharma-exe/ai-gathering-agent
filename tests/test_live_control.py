@@ -14,7 +14,7 @@ class FakeSource:
 
     def screenshot(self, path=None):
         self.calls += 1
-        image = Image.new("RGB", (32, 32), "black")
+        image = Image.new("RGB", (1920, 1080), "black")
         if path is not None:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             image.save(path)
