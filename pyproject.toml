@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "pillow>=11.0",
+    "pyautogui>=0.9.54",
 ]
 
 [dependency-groups]
