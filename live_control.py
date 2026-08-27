@@ -16,6 +16,7 @@ from typing import Callable
 from actions import Action, ActionExecutor, ActionKind, PyAutoGUIExecutor
 from albion_perception import AlbionUIObserver
 from desktop import Desktop
+from live_observe import observe_frame
 from main import action_for_decision, state_from_observation
 from observation import UIObservation
 from planner import DecisionKind, decide
@@ -69,10 +70,10 @@ class AlbionControlObserver:
         self.objective = objective
         self.target_x = target_x
         self.target_y = target_y
-        self.observer = observer or AlbionUIObserver()
+        self.observer = observer
 
     def __call__(self, image: object) -> Observation:
-        ui = self.observer.observe(image)
+        ui = self.observer.observe(image) if self.observer is not None else observe_frame(image)
         return self.to_observation(ui)
 
     def to_observation(self, ui: UIObservation) -> Observation:
