@@ -38,10 +38,16 @@ class Target:
     kind: TargetKind
     resource: str
     distance: float
+    screen_x: float | None = None
+    screen_y: float | None = None
 
     def __post_init__(self) -> None:
         if self.distance < 0:
             raise ValueError("distance cannot be negative")
+        if self.screen_x is not None and not 0 <= self.screen_x <= 1:
+            raise ValueError("screen_x must be between 0 and 1")
+        if self.screen_y is not None and not 0 <= self.screen_y <= 1:
+            raise ValueError("screen_y must be between 0 and 1")
         object.__setattr__(self, "resource", self.resource.strip().lower())
 
     def is_compatible_with(self, objective: Objective) -> bool:
