@@ -1,7 +1,7 @@
 """Controlled action boundary for the gathering-agent brain.
 
 The executor supports a dry-run mode for safe testing and a real PyAutoGUI
-mode for local input automation.  Higher-level planning remains independent
+mode for local input automation. Higher-level planning remains independent
 of the input mechanism.
 """
 
@@ -52,7 +52,7 @@ class PyAutoGUIExecutor(ActionExecutor):
     """Execute primitive mouse/keyboard actions through PyAutoGUI.
 
     ``dry_run=True`` is the default so importing and testing this class never
-    sends input to the desktop.  Real input requires an explicit
+    sends input to the desktop. Real input requires an explicit
     ``dry_run=False``.
     """
 
@@ -90,6 +90,11 @@ class PyAutoGUIExecutor(ActionExecutor):
                 if action.x is None or action.y is None:
                     return ActionResult(False, action, "move requires x and y")
                 gui.moveTo(action.x, action.y, duration=max(0.0, action.duration))
+
+            elif action.kind in {ActionKind.GATHER, ActionKind.INTERACT, ActionKind.ATTACK}:
+                if action.x is None or action.y is None:
+                    return ActionResult(False, action, f"{action.kind.value} requires x and y")
+                gui.click(action.x, action.y)
 
             else:
                 return ActionResult(
