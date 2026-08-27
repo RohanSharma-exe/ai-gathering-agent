@@ -113,10 +113,11 @@ class AlbionUIObserver:
         if not hasattr(image, "size") or not hasattr(image, "convert"):
             raise TypeError("image must be Pillow-compatible")
 
-        mounted, skills_visible = self._skill_state(image)
+        rgb = image.convert("RGB")
+        mounted, skills_visible = self._skill_state(rgb)
         return UIObservation(
             mounted=mounted,
-            inventory_percent=self._inventory_percent(image),
+            inventory_percent=self._inventory_percent(rgb),
             city_present=False,
             chest_present=False,
             skills_visible=skills_visible,
