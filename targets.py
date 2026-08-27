@@ -39,10 +39,13 @@ class TargetCandidate:
         return hypot(x - origin[0], y - origin[1])
 
     def to_target(self, origin: tuple[float, float] = (0.5, 0.5)) -> Target:
+        x, y = self.center
         return Target(
             kind=self.kind,
             resource=self.resource,
             distance=self.estimated_distance(origin),
+            screen_x=x,
+            screen_y=y,
         )
 
 
