@@ -1,9 +1,4 @@
-"""Fast, local visual cues for the Albion Online client.
-
-This module deliberately uses only Pillow. It does not send mouse or keyboard
-input. The live pass extracts mounted state, usable unmounted skills, visible
-inventory load, and conservative resource candidates for the controller.
-"""
+"""Fast, local visual cues for the Albion Online client."""
 
 from __future__ import annotations
 
@@ -83,25 +78,20 @@ class AlbionUIObserver:
         return (not unmounted, unmounted)
 
     def _inventory_percent(self, image: object) -> float | None:
-        """Estimate the load-bar fill, or return None when the bar is uncertain.
-
-        The old implementation classified every dark pixel inside a candidate
-        row as filled. That can mistake unrelated dark UI elements for a full
-        load bar and produced false 100% readings in the live client. This
-        version looks for a pair of horizontal borders and then compares the
-        colored fill region against the unfilled right side of the same bar.
-        """
+        """Estimate the load-bar fill without treating an unrelated strip as full."""
         width, height = image.size
         left = round(self.config.inventory_bar_x[0] * width)
         right = round(self.config.inventory_bar_x[1] * width)
         center_y = round(self.config.inventory_bar_y * height)
-
         if right - left < 20:
             return None
 
+        # Prefer a row between two dark horizontal borders. Some client/UI
+        # scaling modes make those borders only one pixel thick, so fall back
+        # to the configured center row when a border pair is not recoverable.
         rows: list[tuple[int, float]] = []
         for y in range(max(0, center_y - 7), min(height, center_y + 8)):
-            pixels = image.crop((left, y, right + 1, y + 1)).get_flattened_data()
+            pixels = image.crop((left, y, right + 1, y + 1)).convert("RGB").get_flattened_data()
             if not pixels:
                 continue
             dark_fraction = sum(
@@ -110,63 +100,53 @@ class AlbionUIObserver:
             ) / len(pixels)
             rows.append((y, dark_fraction))
 
-        border_pairs: list[tuple[int, int]] = []
-        for index, (top, top_dark) in enumerate(rows):
-            if top_dark < 0.80:
-                continue
-            for bottom, bottom_dark in rows[index + 1 :]:
-                if 3 <= bottom - top <= 5 and bottom_dark >= 0.80:
-                    border_pairs.append((top, bottom))
+        inner_y = center_y
+        border_rows = [y for y, fraction in rows if fraction >= 0.80]
+        for index, top in enumerate(border_rows):
+            bottom = next((candidate for candidate in border_rows[index + 1 :] if 2 <= candidate - top <= 6), None)
+            if bottom is not None:
+                inner_y = (top + bottom) // 2
+                break
 
-        if not border_pairs:
-            return None
-
-        top, bottom = border_pairs[0]
-        inner_y = (top + bottom) // 2
-        inner = image.crop((left + 2, inner_y, right - 1, inner_y + 1)).convert("HSV")
-        pixels = inner.get_flattened_data()
+        pixels = image.crop((left + 2, inner_y, right - 1, inner_y + 1)).convert("RGB").get_flattened_data()
         if len(pixels) < 20:
             return None
 
-        # Use the rightmost 20% as the local unfilled reference. A candidate
-        # must differ from that reference enough to avoid calling an unrelated
-        # uniformly dark strip a 100% load bar.
+        # Compare each position with the rightmost portion of the same row,
+        # which is normally the unfilled background. This works across UI
+        # themes better than assuming one exact fill color.
         split = max(5, len(pixels) // 5)
-        right_ref = pixels[-split:]
-        ref_sat = sum(s for _, s, _ in right_ref) / len(right_ref)
-        ref_value = sum(v for _, _, v in right_ref) / len(right_ref)
+        reference = pixels[-split:]
+        ref_luma = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in reference) / len(reference)
+        ref_sat = sum(max(r, g, b) - min(r, g, b) for r, g, b in reference) / len(reference)
 
-        scores: list[float] = []
-        for saturation, value in ((s, v) for _, s, v in pixels):
-            sat_delta = abs(saturation - ref_sat)
-            value_delta = abs(value - ref_value)
-            scores.append(min(1.0, (sat_delta / 45.0) + (value_delta / 90.0)))
+        filled: list[bool] = []
+        for r, g, b in pixels:
+            luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            sat = max(r, g, b) - min(r, g, b)
+            filled.append((ref_luma - luma) >= 15 or abs(sat - ref_sat) >= 20)
 
-        # Require a substantial left-to-right transition. If the whole bar is
-        # visually uniform, its fill percentage is unknown rather than 100%.
-        threshold = 0.35
-        filled = [score >= threshold for score in scores]
-        transition = next((i for i, value in enumerate(filled) if not value), None)
-        if transition is None:
-            # A genuinely full bar can have no transition, but only accept it
-            # when the left side is also consistently different from the right.
-            left_sample = scores[: max(5, len(scores) // 5)]
-            if sum(left_sample) / len(left_sample) < threshold:
-                return None
-            return 100.0
-
-        if transition == 0:
-            return 0.0
-
-        # The fill is expected to be contiguous from the left edge. If there
-        # are too many alternating pixels, this is not a reliable load bar.
+        # The fill must begin at the left and remain contiguous. If there is
+        # no credible filled prefix, report unknown rather than 0/100.
         contiguous = 0
         for value in filled:
             if not value:
                 break
             contiguous += 1
-        if contiguous < max(2, len(filled) // 100):
-            return 0.0
+
+        if contiguous == 0:
+            # A completely filled bar has no unfilled tail; only accept it if
+            # the left and right samples are materially different from the
+            # surrounding row rather than blindly returning 100%.
+            left_luma = sum(
+                0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in pixels[:split]
+            ) / split
+            if ref_luma - left_luma >= 15:
+                return 100.0
+            return None
+
+        # Reject noisy/non-bar rows with filled pixels reappearing after the
+        # first unfilled region.
         if any(filled[contiguous + 3 :]):
             return None
 
