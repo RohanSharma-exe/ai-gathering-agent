@@ -7,6 +7,7 @@ from time import sleep as default_sleep
 from typing import Callable, Protocol
 
 from actions import Action, ActionExecutor, ActionKind
+from config import DEFAULT_INVENTORY_RETURN_THRESHOLD
 from state import Objective
 from vision import Observation
 
@@ -25,6 +26,9 @@ class LiveControlConfig:
     dismount_key: str | None = "a"
     gather_cooldown: float = 0.25
     min_mount_confidence: float = 0.8
+    inventory_return_threshold: float = DEFAULT_INVENTORY_RETURN_THRESHOLD
+    max_gathers: int | None = None
+    dismount_only: bool = False
 
     def __post_init__(self) -> None:
         if self.max_frames < 1:
@@ -33,25 +37,16 @@ class LiveControlConfig:
             raise ValueError("min_mount_confidence must be between 0 and 1")
         if self.gather_cooldown < 0:
             raise ValueError("gather_cooldown cannot be negative")
+        if not 0 <= self.inventory_return_threshold <= 100:
+            raise ValueError("inventory_return_threshold must be between 0 and 100")
+        if self.max_gathers is not None and self.max_gathers < 1:
+            raise ValueError("max_gathers must be positive when provided")
 
 
 class LiveControlRuntime:
-    """Observe the game and execute only conservative, verified actions.
+    """Observe the game and execute only conservative, verified actions."""
 
-    The runtime deliberately does not navigate blindly. It only gathers a
-    compatible visible target after confirming the player is dismounted, and it
-    stops immediately if an input is rejected or a required state is uncertain.
-    """
-
-    def __init__(
-        self,
-        source: ScreenshotSource,
-        observe: Callable[[object], Observation],
-        executor: ActionExecutor,
-        objective: Objective,
-        config: LiveControlConfig | None = None,
-        sleep: Callable[[float], None] = default_sleep,
-    ) -> None:
+    def __init__(self, source: ScreenshotSource, observe: Callable[[object], Observation], executor: ActionExecutor, objective: Objective, config: LiveControlConfig | None = None, sleep: Callable[[float], None] = default_sleep) -> None:
         self.source = source
         self.observe = observe
         self.executor = executor
@@ -65,9 +60,9 @@ class LiveControlRuntime:
         return self.executor.execute(action).accepted
 
     def run(self) -> int:
-        """Process at most ``max_frames`` observations; return frames processed."""
         frames = 0
-        mounted = False
+        dismount_requested = False
+        gathers = 0
 
         while frames < self.config.max_frames:
             image = self.source.screenshot()
@@ -76,30 +71,27 @@ class LiveControlRuntime:
 
             if observation.mounted_confidence < self.config.min_mount_confidence:
                 break
+            if observation.inventory_percent >= self.config.inventory_return_threshold:
+                break
 
             if observation.mounted:
-                if not self.config.dismount_key:
-                    break
-                if not self._execute(
-                    Action(kind=ActionKind.PRESS_KEY, key=self.config.dismount_key)
-                ):
-                    break
-                mounted = True
+                if not dismount_requested:
+                    if not self.config.dismount_key:
+                        break
+                    if not self._execute(Action(kind=ActionKind.PRESS_KEY, key=self.config.dismount_key)):
+                        break
+                    dismount_requested = True
+                if self.config.gather_cooldown:
+                    self.sleep(self.config.gather_cooldown)
                 continue
 
-            if mounted:
-                mounted = False
+            dismount_requested = False
+            if self.config.dismount_only:
+                break
+            if self.config.max_gathers is not None and gathers >= self.config.max_gathers:
+                break
 
-            target = next(
-                (
-                    candidate
-                    for candidate in observation.targets
-                    if candidate.is_compatible_with(self.objective)
-                    and candidate.screen_x is not None
-                    and candidate.screen_y is not None
-                ),
-                None,
-            )
+            target = next((candidate for candidate in observation.targets if candidate.is_compatible_with(self.objective) and candidate.screen_x is not None and candidate.screen_y is not None), None)
             if target is None:
                 continue
 
@@ -109,14 +101,15 @@ class LiveControlRuntime:
             action = Action(kind=ActionKind.GATHER, target_id=target.resource, x=x, y=y)
             if not self._execute(action):
                 break
+            gathers += 1
+            if self.config.max_gathers is not None and gathers >= self.config.max_gathers:
+                break
             if self.config.gather_cooldown:
                 self.sleep(self.config.gather_cooldown)
 
         return frames
 
 
-# Backward-compatible primitive controller retained for callers that only need
-# direct keyboard input. The runtime above is the preferred game-facing API.
 @dataclass(frozen=True)
 class ControlConfig:
     mount_key: str = "a"

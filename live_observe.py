@@ -17,15 +17,60 @@ from runtime import ObservationRuntime, RuntimeConfig
 
 
 _observer = AlbionUIObserver()
+_dpi_awareness_initialized = False
 
 
-def _albion_client_rect() -> tuple[int, int, int, int] | None:
+def _ensure_dpi_awareness() -> None:
+    """Make Win32 window coordinates use the same physical pixels as screenshots.
+
+    PyAutoGUI/Pillow screenshots are physical screen pixels. If the Python
+    process is DPI-virtualized, GetClientRect/ClientToScreen can instead report
+    logical coordinates, producing a consistent offset/scale error when those
+    coordinates are used for mouse clicks. Albion is commonly run on a scaled
+    Windows desktop, so opt this process into physical-pixel coordinates before
+    querying the window.
+    """
+    global _dpi_awareness_initialized
+    if _dpi_awareness_initialized or not hasattr(ctypes, "windll"):
+        return
+
+    user32 = ctypes.windll.user32
+    try:
+        # Available on supported Windows versions and sufficient for this
+        # single-monitor/local-client calibration path.
+        user32.SetProcessDPIAware()
+    except (AttributeError, OSError):
+        pass
+    _dpi_awareness_initialized = True
+
+
+def _find_albion_window() -> int | None:
+    if not hasattr(ctypes, "windll"):
+        return None
+    _ensure_dpi_awareness()
+    hwnd = ctypes.windll.user32.FindWindowW(None, "Albion Online Client")
+    return int(hwnd) if hwnd else None
+
+
+def activate_albion_window() -> bool:
+    """Bring the Albion client to the foreground on Windows."""
+    hwnd = _find_albion_window()
+    if hwnd is None:
+        return False
+    user32 = ctypes.windll.user32
+    # SW_RESTORE = 9. Restoring first also handles a minimized Albion window.
+    user32.ShowWindow(hwnd, 9)
+    return bool(user32.SetForegroundWindow(hwnd))
+
+
+def albion_client_rect() -> tuple[int, int, int, int] | None:
     """Return the Albion client-area rectangle on Windows, if visible."""
     if not hasattr(ctypes, "windll"):
         return None
 
+    _ensure_dpi_awareness()
     user32 = ctypes.windll.user32
-    hwnd = user32.FindWindowW(None, "Albion Online Client")
+    hwnd = _find_albion_window()
     if not hwnd:
         return None
 
@@ -56,22 +101,28 @@ def _albion_client_rect() -> tuple[int, int, int, int] | None:
     return left, top, right, bottom
 
 
-def observe_frame(image: object) -> UIObservation:
-    """Interpret the Albion client portion of one desktop screenshot."""
+def crop_albion_client(image: object) -> object:
+    """Crop a desktop screenshot to the Albion client area when detectable."""
     if not hasattr(image, "size") or not hasattr(image, "crop"):
         raise TypeError("expected a Pillow-compatible screenshot image")
 
-    rect = _albion_client_rect()
-    if rect is not None:
-        left, top, right, bottom = rect
-        screen_width, screen_height = image.size
-        left = max(0, min(left, screen_width - 1))
-        top = max(0, min(top, screen_height - 1))
-        right = max(left + 1, min(right, screen_width))
-        bottom = max(top + 1, min(bottom, screen_height))
-        image = image.crop((left, top, right, bottom))
+    rect = albion_client_rect()
+    if rect is None:
+        return image
 
-    return _observer.observe(image)
+    left, top, right, bottom = rect
+    screen_width, screen_height = image.size
+    left = max(0, min(left, screen_width - 1))
+    top = max(0, min(top, screen_height - 1))
+    right = max(left + 1, min(right, screen_width))
+    bottom = max(top + 1, min(bottom, screen_height))
+    return image.crop((left, top, right, bottom))
+
+
+def observe_frame(image: object, resources: set[str] | None = None) -> UIObservation:
+    """Interpret the Albion client portion of one desktop screenshot."""
+    client_image = crop_albion_client(image)
+    return _observer.observe(client_image, resources=resources)
 
 
 def describe(frame: object) -> None:

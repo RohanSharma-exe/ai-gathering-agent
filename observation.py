@@ -7,6 +7,8 @@ runtime integration.
 
 from dataclasses import dataclass
 
+from state import Target
+
 
 @dataclass(frozen=True)
 class UIObservation:
@@ -17,6 +19,7 @@ class UIObservation:
     city_present: bool = False
     chest_present: bool = False
     skills_visible: bool = False
+    targets: tuple[Target, ...] = ()
 
     def __post_init__(self) -> None:
         if self.inventory_percent is not None and self.inventory_percent < 0:
