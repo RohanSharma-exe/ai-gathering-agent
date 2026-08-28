@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from typing import Callable
 
 from actions import Action, ActionExecutor, PyAutoGUIExecutor
@@ -65,7 +66,7 @@ def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[
     return observer, observe
 
 
-def _print_dry_run_action(action: Action) -> None:
+def _print_action(action: Action, dry_run: bool) -> None:
     details = [f"action={action.kind.value}"]
     if action.target_id is not None:
         details.append(f"target={action.target_id}")
@@ -73,7 +74,7 @@ def _print_dry_run_action(action: Action) -> None:
         details.append(f"x={action.x} y={action.y}")
     if action.key is not None:
         details.append(f"key={action.key}")
-    print(" ".join(details))
+    print(("proposed " if dry_run else "sending ") + " ".join(details), flush=True)
 
 
 def main() -> int:
@@ -121,16 +122,41 @@ def main() -> int:
         if not activate_albion_window():
             print("ERROR: could not activate 'Albion Online Client'; no input sent.")
             return 2
-        print("Albion window activated; real input is enabled.")
+        print("Albion window activated; waiting for focus to settle...")
+        time.sleep(0.75)
 
     runtime = LiveControlRuntime(source, observe, executor, Objective(args.resource), config)
+    original_observe = runtime.observe
     original_execute = runtime._execute
+    frame_counter = 0
+
+    def diagnostic_observe(image: object) -> Observation:
+        nonlocal frame_counter
+        observation = original_observe(image)
+        frame_counter += 1
+        print(
+            f"frame={frame_counter} mounted={observation.mounted} "
+            f"mount_confidence={observation.mounted_confidence:.2f} "
+            f"inventory={observation.inventory_percent:.1f}% "
+            f"targets={len(observation.targets)}",
+            flush=True,
+        )
+        for target in observation.targets[:5]:
+            print(
+                f"  target={target.resource} kind={target.kind.value} "
+                f"screen=({target.screen_x},{target.screen_y})",
+                flush=True,
+            )
+        return observation
 
     def diagnostic_execute(action: Action) -> bool:
+        _print_action(action, config.dry_run)
         if config.dry_run:
-            _print_dry_run_action(action)
+            return original_execute(action)
+        print("  input sent; re-observing before any further action", flush=True)
         return original_execute(action)
 
+    runtime.observe = diagnostic_observe
     runtime._execute = diagnostic_execute
     processed = runtime.run()
     print(f"stopped after {processed} frame(s)")
