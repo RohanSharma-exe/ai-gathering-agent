@@ -130,11 +130,10 @@ def main() -> int:
     print(f"resource={args.resource} frames={args.frames} interval={args.interval}s")
     print("screenshots=memory-only")
     if args.live:
-        print("WARNING: real mouse/keyboard input is enabled.")
         if not activate_albion_window():
-            print("ERROR: could not activate 'Albion Online Client'; no input will be sent.")
+            print("ERROR: could not activate 'Albion Online Client'; no input sent.")
             return 2
-        print("Albion window activated; input will be sent to the game.")
+        print("Albion window activated; real input is enabled.")
 
     runtime = LiveControlRuntime(
         source=source,
