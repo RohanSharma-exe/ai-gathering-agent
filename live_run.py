@@ -17,7 +17,7 @@ from actions import Action, ActionExecutor, PyAutoGUIExecutor
 from albion_perception import AlbionUIObserver
 from desktop import Desktop
 from live_control import LiveControlConfig, LiveControlRuntime
-from live_observe import albion_client_rect, crop_albion_client
+from live_observe import activate_albion_window, albion_client_rect, crop_albion_client
 from observation import UIObservation
 from state import Objective, Target
 from vision import Observation
@@ -131,7 +131,10 @@ def main() -> int:
     print("screenshots=memory-only")
     if args.live:
         print("WARNING: real mouse/keyboard input is enabled.")
-        print("Keep Albion focused and use PyAutoGUI's emergency stop if needed.")
+        if not activate_albion_window():
+            print("ERROR: could not activate 'Albion Online Client'; no input will be sent.")
+            return 2
+        print("Albion window activated; input will be sent to the game.")
 
     runtime = LiveControlRuntime(
         source=source,
@@ -142,10 +145,8 @@ def main() -> int:
     )
 
     original_execute = runtime._execute
-    frame_counter = 0
 
     def diagnostic_execute(action: Action) -> bool:
-        nonlocal frame_counter
         if config.dry_run:
             _print_dry_run_action(action)
         return original_execute(action)
