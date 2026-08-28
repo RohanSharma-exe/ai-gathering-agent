@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from pathlib import Path
 from typing import Callable
 
 from actions import Action, ActionExecutor, PyAutoGUIExecutor
@@ -51,10 +52,6 @@ def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[
         client_image = crop_albion_client(image)
         ui: UIObservation = observer.observe(client_image, resources=wanted)
         confidence = 1.0 if ui.mounted is not None else 0.0
-        # Observation currently requires a numeric inventory value. Unknown
-        # perception is therefore represented as 0 for the controller model;
-        # diagnostics retain the distinction by reading the UI observer before
-        # this conversion when needed.
         inventory_percent = 0.0 if ui.inventory_percent is None else ui.inventory_percent
         return Observation(
             inventory_percent=inventory_percent,
@@ -77,6 +74,31 @@ def _print_action(action: Action, dry_run: bool) -> None:
     print(("proposed " if dry_run else "sending ") + " ".join(details), flush=True)
 
 
+def _save_target_debug(image: object, target: Target, output: Path) -> None:
+    """Save one desktop frame with the exact proposed click point marked."""
+    if target.screen_x is None or target.screen_y is None:
+        return
+    if not hasattr(image, "copy") or not hasattr(image, "size"):
+        return
+    try:
+        from PIL import ImageDraw
+    except ImportError:
+        return
+    width, height = image.size
+    x = round(target.screen_x * width)
+    y = round(target.screen_y * height)
+    debug = image.copy()
+    draw = ImageDraw.Draw(debug)
+    radius = 20
+    draw.ellipse((x - radius, y - radius, x + radius, y + radius), outline=(255, 0, 0), width=4)
+    draw.line((x - 30, y, x + 30, y), fill=(255, 0, 0), width=3)
+    draw.line((x, y - 30, x, y + 30), fill=(255, 0, 0), width=3)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    debug.save(output)
+    print(f"target-debug={output.resolve()}", flush=True)
+    print(f"desktop-size={width}x{height} click=({x},{y}) client-rect={albion_client_rect()}", flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the guarded Albion gathering controller")
     parser.add_argument("--resource", default="wood")
@@ -86,6 +108,7 @@ def main() -> int:
     parser.add_argument("--max-gathers", type=int, default=None)
     parser.add_argument("--dismount-only", action="store_true")
     parser.add_argument("--live", action="store_true", help="ENABLE real mouse/keyboard input")
+    parser.add_argument("--target-debug", action="store_true", help="save one frame showing the proposed target click; never sends input")
     args = parser.parse_args()
     if args.frames < 1:
         parser.error("--frames must be positive")
@@ -95,6 +118,8 @@ def main() -> int:
         parser.error("--max-gathers must be positive")
     if args.dismount_only and args.max_gathers is not None:
         parser.error("--dismount-only cannot be combined with --max-gathers")
+    if args.target_debug and args.live:
+        parser.error("--target-debug cannot be combined with --live")
 
     desktop = Desktop(dry_run=True)
     source = AlbionScreenshotSource(desktop)
@@ -110,6 +135,8 @@ def main() -> int:
         print(f"max_gathers={args.max_gathers}")
     if args.dismount_only:
         print("dismount_only=true")
+    if args.target_debug:
+        print("target_debug=true")
     if args.live:
         if not activate_albion_window():
             print("ERROR: could not activate 'Albion Online Client'; no input sent.")
@@ -121,14 +148,18 @@ def main() -> int:
     original_observe = runtime.observe
     original_execute = runtime._execute
     frame_counter = 0
+    debug_done = False
 
     def diagnostic_observe(image: object) -> Observation:
-        nonlocal frame_counter
+        nonlocal frame_counter, debug_done
         observation = original_observe(image)
         frame_counter += 1
         print(f"frame={frame_counter} mounted={observation.mounted} mount_confidence={observation.mounted_confidence:.2f} inventory={observation.inventory_percent:.1f}% targets={len(observation.targets)}", flush=True)
         for target in observation.targets[:5]:
             print(f"  target={target.resource} kind={target.kind.value} screen=({target.screen_x},{target.screen_y})", flush=True)
+        if args.target_debug and not debug_done and observation.targets:
+            _save_target_debug(image, observation.targets[0], Path("screenshots/live/target_debug.png"))
+            debug_done = True
         return observation
 
     def diagnostic_execute(action: Action) -> bool:
