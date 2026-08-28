@@ -1,12 +1,4 @@
-"""Guarded live runner for the Albion gathering prototype.
-
-The runner is deliberately conservative:
-- dry-run is the default;
-- --live is required before any desktop input can be sent;
-- the first live invocation should use a small --frames value;
-- screenshots are never persisted by this runner;
-- LiveControlRuntime remains the single decision/action boundary.
-"""
+"""Guarded live runner for the Albion gathering prototype."""
 
 from __future__ import annotations
 
@@ -33,22 +25,16 @@ class AlbionScreenshotSource:
         return self.desktop.screenshot()
 
 
-def _desktop_targets(
-    targets: tuple[Target, ...],
-    image: object,
-) -> tuple[Target, ...]:
-    """Convert client-relative target coordinates into desktop coordinates."""
+def _desktop_targets(targets: tuple[Target, ...], image: object) -> tuple[Target, ...]:
     rect = albion_client_rect()
     if rect is None:
         return targets
-
     left, top, right, bottom = rect
     screen_width, screen_height = image.size
     client_width = right - left
     client_height = bottom - top
     if client_width <= 0 or client_height <= 0:
         return ()
-
     mapped: list[Target] = []
     for target in targets:
         if target.screen_x is None or target.screen_y is None:
@@ -69,7 +55,6 @@ def _desktop_targets(
 
 
 def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[[object], Observation]]:
-    """Build an objective-specific observer for the live controller."""
     observer = AlbionUIObserver()
     wanted = {resource.strip().lower()}
 
@@ -89,7 +74,6 @@ def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[
 
 
 def _print_dry_run_action(action: Action) -> None:
-    """Print an action that would be sent without sending desktop input."""
     details = [f"action={action.kind.value}"]
     if action.target_id is not None:
         details.append(f"target={action.target_id}")
@@ -106,6 +90,7 @@ def main() -> int:
     parser.add_argument("--frames", type=int, default=5, help="maximum observation frames")
     parser.add_argument("--interval", type=float, default=0.5, help="seconds between frames")
     parser.add_argument("--dismount-key", default="a", help="key used to mount/dismount")
+    parser.add_argument("--max-gathers", type=int, default=None, help="stop after this many gather actions")
     parser.add_argument("--live", action="store_true", help="ENABLE real mouse/keyboard input")
     args = parser.parse_args()
 
@@ -113,6 +98,8 @@ def main() -> int:
         parser.error("--frames must be positive")
     if args.interval < 0:
         parser.error("--interval cannot be negative")
+    if args.max_gathers is not None and args.max_gathers < 1:
+        parser.error("--max-gathers must be positive")
 
     desktop = Desktop(dry_run=True)
     source = AlbionScreenshotSource(desktop)
@@ -123,12 +110,15 @@ def main() -> int:
         dry_run=not args.live,
         dismount_key=args.dismount_key,
         gather_cooldown=args.interval,
+        max_gathers=args.max_gathers,
     )
 
     print("=== Albion Gathering Agent ===")
     print(f"mode={'LIVE INPUT ENABLED' if args.live else 'DRY-RUN (no input)'}")
     print(f"resource={args.resource} frames={args.frames} interval={args.interval}s")
     print("screenshots=memory-only")
+    if args.max_gathers is not None:
+        print(f"max_gathers={args.max_gathers}")
     if args.live:
         if not activate_albion_window():
             print("ERROR: could not activate 'Albion Online Client'; no input sent.")
