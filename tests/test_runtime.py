@@ -36,6 +36,20 @@ def test_runtime_captures_requested_number_of_frames(tmp_path):
     assert len(list(tmp_path.glob("frame_*.png"))) == 3
 
 
+def test_runtime_does_not_persist_frames_by_default(tmp_path):
+    source = FakeSource()
+    runtime = ObservationRuntime(
+        source,
+        lambda image: UIObservation(),
+        RuntimeConfig(interval_seconds=0.01, max_frames=2, output_dir=tmp_path),
+        sleep=lambda _: None,
+    )
+
+    assert runtime.run() == 2
+    assert source.paths == [None, None]
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_runtime_does_not_sleep_after_final_frame():
     source = FakeSource()
     sleeps = []
