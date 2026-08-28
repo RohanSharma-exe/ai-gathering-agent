@@ -11,14 +11,16 @@ The runner is deliberately conservative:
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+from typing import Callable
 
 from actions import ActionExecutor, PyAutoGUIExecutor
 from albion_perception import AlbionUIObserver
 from desktop import Desktop
 from live_control import LiveControlConfig, LiveControlRuntime
+from live_observe import crop_albion_client
 from observation import UIObservation
 from state import Objective
+from vision import Observation
 
 
 class AlbionScreenshotSource:
@@ -31,11 +33,22 @@ class AlbionScreenshotSource:
         return self.desktop.screenshot()
 
 
-def observe_factory() -> tuple[AlbionUIObserver, callable]:
+def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[[object], Observation]]:
+    """Build an objective-specific observer for the live controller."""
     observer = AlbionUIObserver()
+    wanted = {resource.strip().lower()}
 
-    def observe(image: object) -> UIObservation:
-        return observer.observe(image)
+    def observe(image: object) -> Observation:
+        client_image = crop_albion_client(image)
+        ui: UIObservation = observer.observe(client_image, resources=wanted)
+        confidence = 1.0 if ui.mounted is not None else 0.0
+        return Observation(
+            inventory_percent=0.0 if ui.inventory_percent is None else ui.inventory_percent,
+            mounted=False if ui.mounted is None else ui.mounted,
+            targets=ui.targets,
+            player_confidence=confidence,
+            mounted_confidence=confidence,
+        )
 
     return observer, observe
 
@@ -57,7 +70,7 @@ def main() -> int:
     # Desktop screenshots are always taken without desktop input here.
     desktop = Desktop(dry_run=True)
     source = AlbionScreenshotSource(desktop)
-    _, observe = observe_factory()
+    _, observe = observe_factory(args.resource)
 
     executor: ActionExecutor = PyAutoGUIExecutor(dry_run=not args.live)
     config = LiveControlConfig(
