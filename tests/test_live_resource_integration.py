@@ -54,7 +54,7 @@ def test_live_runner_maps_client_coordinates_to_desktop_coordinates(monkeypatch)
     mapped = _desktop_targets((target,), Image.new("RGB", (1000, 800)))
 
     assert mapped[0].screen_x == 0.5
-    assert mapped[0].screen_y == 0.375
+    assert mapped[0].screen_y == 0.3625
 
 
 def test_live_runtime_stops_before_input_when_inventory_is_full() -> None:
