@@ -27,6 +27,7 @@ class LiveControlConfig:
     gather_cooldown: float = 0.25
     min_mount_confidence: float = 0.8
     inventory_return_threshold: float = DEFAULT_INVENTORY_RETURN_THRESHOLD
+    max_gathers: int | None = None
 
     def __post_init__(self) -> None:
         if self.max_frames < 1:
@@ -37,16 +38,12 @@ class LiveControlConfig:
             raise ValueError("gather_cooldown cannot be negative")
         if not 0 <= self.inventory_return_threshold <= 100:
             raise ValueError("inventory_return_threshold must be between 0 and 100")
+        if self.max_gathers is not None and self.max_gathers < 1:
+            raise ValueError("max_gathers must be positive when provided")
 
 
 class LiveControlRuntime:
-    """Observe the game and execute only conservative, verified actions.
-
-    The runtime deliberately does not navigate blindly. It only gathers a
-    compatible visible target after confirming the player is dismounted, and it
-    stops immediately if an input is rejected, capacity is high, or a required
-    state is uncertain.
-    """
+    """Observe the game and execute only conservative, verified actions."""
 
     def __init__(
         self,
@@ -73,6 +70,7 @@ class LiveControlRuntime:
         """Process at most ``max_frames`` observations; return frames processed."""
         frames = 0
         dismount_requested = False
+        gathers = 0
 
         while frames < self.config.max_frames:
             image = self.source.screenshot()
@@ -86,8 +84,6 @@ class LiveControlRuntime:
                 break
 
             if observation.mounted:
-                # Request a dismount only once. Wait for a subsequent visual
-                # observation to confirm mounted=False before any gather action.
                 if not dismount_requested:
                     if not self.config.dismount_key:
                         break
@@ -100,9 +96,10 @@ class LiveControlRuntime:
                     self.sleep(self.config.gather_cooldown)
                 continue
 
-            # A confirmed mounted=False observation is the acknowledgement of
-            # the dismount request. Gathering is allowed only after this point.
             dismount_requested = False
+
+            if self.config.max_gathers is not None and gathers >= self.config.max_gathers:
+                break
 
             target = next(
                 (
@@ -123,14 +120,15 @@ class LiveControlRuntime:
             action = Action(kind=ActionKind.GATHER, target_id=target.resource, x=x, y=y)
             if not self._execute(action):
                 break
+            gathers += 1
+            if self.config.max_gathers is not None and gathers >= self.config.max_gathers:
+                break
             if self.config.gather_cooldown:
                 self.sleep(self.config.gather_cooldown)
 
         return frames
 
 
-# Backward-compatible primitive controller retained for callers that only need
-# direct keyboard input. The runtime above is the preferred game-facing API.
 @dataclass(frozen=True)
 class ControlConfig:
     mount_key: str = "a"
