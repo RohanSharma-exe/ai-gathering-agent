@@ -22,7 +22,12 @@ class FrameSource(Protocol):
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    """Configuration for the observation-only loop."""
+    """Configuration for the observation-only loop.
+
+    Screenshots are kept in memory by default. Persisting every frame is an
+    explicit debugging option because an unbounded live session can otherwise
+    fill the disk with PNG files.
+    """
 
     interval_seconds: float = 0.25
     max_frames: int | None = None
@@ -91,10 +96,15 @@ def run_live_observation(
     *,
     interval_seconds: float = 0.25,
     max_frames: int | None = 20,
-    save_frames: bool = True,
+    save_frames: bool = False,
     output_dir: str | Path = "screenshots/live",
 ) -> int:
-    """Convenience entry point using the desktop screenshot adapter."""
+    """Convenience entry point using the desktop screenshot adapter.
+
+    Frame persistence is opt-in. The normal live path therefore captures
+    screenshots in memory without creating an ever-growing screenshot
+    directory.
+    """
     runtime = ObservationRuntime(
         Desktop(dry_run=True),
         observer,
