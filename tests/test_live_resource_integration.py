@@ -1,10 +1,9 @@
 from PIL import Image, ImageDraw
 
-import live_run
 from actions import ActionExecutor
 from live_control import LiveControlConfig, LiveControlRuntime
-from live_run import observe_factory
-from state import Objective
+from live_run import _desktop_targets, observe_factory
+from state import Objective, Target, TargetKind
 from vision import Observation
 
 
@@ -45,18 +44,17 @@ def test_live_observer_maps_visible_wood_to_a_gather_target() -> None:
     assert observation.targets[0].screen_y is not None
 
 
-def test_live_observer_maps_client_coordinates_to_desktop_coordinates(monkeypatch) -> None:
-    monkeypatch.setattr(live_run, "albion_client_rect", lambda: (100, 50, 900, 650))
-    image = Image.new("RGB", (1000, 800), (30, 30, 30))
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((450, 250, 500, 315), fill=(120, 80, 40))
+def test_live_runner_maps_client_coordinates_to_desktop_coordinates(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "live_run.albion_client_rect",
+        lambda: (100, 50, 900, 650),
+    )
+    target = Target(TargetKind.RESOURCE, "wood", 0.1, 0.5, 0.4)
 
-    _, observe = observe_factory("wood")
-    observation = observe(image)
+    mapped = _desktop_targets((target,), Image.new("RGB", (1000, 800)))
 
-    assert observation.targets
-    assert 0.50 < observation.targets[0].screen_x < 0.60
-    assert 0.30 < observation.targets[0].screen_y < 0.45
+    assert mapped[0].screen_x == 0.5
+    assert mapped[0].screen_y == 0.375
 
 
 def test_live_runtime_stops_before_input_when_inventory_is_full() -> None:
