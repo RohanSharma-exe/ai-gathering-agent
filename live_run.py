@@ -42,15 +42,7 @@ def _desktop_targets(targets: tuple[Target, ...], image: object) -> tuple[Target
             continue
         screen_x = (left + target.screen_x * client_width) / screen_width
         screen_y = (top + target.screen_y * client_height) / screen_height
-        mapped.append(
-            Target(
-                target.kind,
-                target.resource,
-                target.distance,
-                max(0.0, min(1.0, screen_x)),
-                max(0.0, min(1.0, screen_y)),
-            )
-        )
+        mapped.append(Target(target.kind, target.resource, target.distance, max(0.0, min(1.0, screen_x)), max(0.0, min(1.0, screen_y))))
     return tuple(mapped)
 
 
@@ -91,6 +83,7 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=0.5, help="seconds between frames")
     parser.add_argument("--dismount-key", default="a", help="key used to mount/dismount")
     parser.add_argument("--max-gathers", type=int, default=None, help="stop after this many gather actions")
+    parser.add_argument("--dismount-only", action="store_true", help="test dismounting only; never gather")
     parser.add_argument("--live", action="store_true", help="ENABLE real mouse/keyboard input")
     args = parser.parse_args()
 
@@ -111,6 +104,7 @@ def main() -> int:
         dismount_key=args.dismount_key,
         gather_cooldown=args.interval,
         max_gathers=args.max_gathers,
+        dismount_only=args.dismount_only,
     )
 
     print("=== Albion Gathering Agent ===")
@@ -119,20 +113,15 @@ def main() -> int:
     print("screenshots=memory-only")
     if args.max_gathers is not None:
         print(f"max_gathers={args.max_gathers}")
+    if args.dismount_only:
+        print("dismount_only=true")
     if args.live:
         if not activate_albion_window():
             print("ERROR: could not activate 'Albion Online Client'; no input sent.")
             return 2
         print("Albion window activated; real input is enabled.")
 
-    runtime = LiveControlRuntime(
-        source=source,
-        observe=observe,
-        executor=executor,
-        objective=Objective(args.resource),
-        config=config,
-    )
-
+    runtime = LiveControlRuntime(source, observe, executor, Objective(args.resource), config)
     original_execute = runtime._execute
 
     def diagnostic_execute(action: Action) -> bool:
