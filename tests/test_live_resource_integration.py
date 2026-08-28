@@ -33,7 +33,11 @@ def _wood_frame() -> Image.Image:
     return image
 
 
-def test_live_observer_maps_visible_wood_to_a_gather_target() -> None:
+def test_live_observer_maps_visible_wood_to_a_gather_target(monkeypatch) -> None:
+    # observe_factory normally crops a real Albion window. This unit/integration
+    # fixture is already a client-sized image, so keep it unchanged even when
+    # Albion happens to be open on the test machine.
+    monkeypatch.setattr("live_run.crop_albion_client", lambda image: image)
     _, observe = observe_factory("wood")
 
     observation = observe(_wood_frame())
