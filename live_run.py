@@ -11,7 +11,6 @@ The runner is deliberately conservative:
 from __future__ import annotations
 
 import argparse
-from math import hypot
 from typing import Callable
 
 from actions import ActionExecutor, PyAutoGUIExecutor
@@ -20,7 +19,7 @@ from desktop import Desktop
 from live_control import LiveControlConfig, LiveControlRuntime
 from live_observe import albion_client_rect, crop_albion_client
 from observation import UIObservation
-from state import Objective, Target, TargetKind
+from state import Objective, Target
 from vision import Observation
 
 
@@ -59,7 +58,7 @@ def _desktop_targets(
         screen_y = (top + target.screen_y * client_height) / screen_height
         mapped.append(
             Target(
-                TargetKind.RESOURCE,
+                target.kind,
                 target.resource,
                 target.distance,
                 max(0.0, min(1.0, screen_x)),
