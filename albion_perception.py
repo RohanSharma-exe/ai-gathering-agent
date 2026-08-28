@@ -23,6 +23,11 @@ class AlbionPerceptionConfig:
     inventory_bar_y: float = 0.454
     colored_skill_threshold: float = 0.60
     unmounted_slot_count: int = 3
+    player_artifact_radius: float = 0.03
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.player_artifact_radius <= 0.25:
+            raise ValueError("player_artifact_radius must be between 0 and 0.25")
 
 
 class AlbionUIObserver:
@@ -89,9 +94,6 @@ class AlbionUIObserver:
             if prefix < 2:
                 continue
 
-            # A genuine partial bar has a clear transition to the unfilled
-            # tail. Estimate its fill from that transition. For a full bar,
-            # require the left side to differ strongly from the right-side UI.
             if prefix >= len(row) - 2:
                 left_mean = tuple(sum(p[channel] for p in row[:tail_n]) / tail_n for channel in range(3))
                 left_right_distance = sum((left_mean[channel] - ref[channel]) ** 2 for channel in range(3)) ** 0.5
@@ -101,7 +103,6 @@ class AlbionUIObserver:
             else:
                 percent = prefix / len(row) * 100.0
 
-            # Prefer a substantial, clean prefix over incidental UI contrast.
             score = min(contrast / 100.0, 2.0) + min(prefix / len(row), 1.0)
             if best is None or score > best[0]:
                 best = (score, percent)
@@ -115,6 +116,7 @@ class AlbionUIObserver:
         wanted &= self._DETECTABLE_RESOURCES
         if not wanted:
             return ()
+
         detections = self.resource_detector.detect(image, resources=wanted)
         targets = []
         for detection in detections:
@@ -122,7 +124,25 @@ class AlbionUIObserver:
             screen_y = detection.box.y + detection.box.height / 2
             distance = hypot(screen_x - 0.5, screen_y - 0.5)
             targets.append(Target(TargetKind.RESOURCE, detection.label, distance, screen_x, screen_y))
-        return tuple(sorted(targets, key=lambda target: target.distance))
+
+        targets.sort(key=lambda target: target.distance)
+        if len(targets) <= 1 or self.config.player_artifact_radius == 0:
+            return tuple(targets)
+
+        # The lightweight colour detector can mistake the player's own gear for
+        # wood. In the live Albion camera the player is consistently the nearest
+        # candidate to the viewport centre. Treat that nearest candidate as a
+        # player proxy and suppress only candidates in its small immediate area.
+        player_proxy = targets[0]
+        filtered = [
+            target
+            for target in targets
+            if hypot(
+                target.screen_x - player_proxy.screen_x,
+                target.screen_y - player_proxy.screen_y,
+            ) > self.config.player_artifact_radius
+        ]
+        return tuple(filtered or targets[:1])
 
     def observe(self, image: object, *, resources: set[str] | None = None) -> UIObservation:
         if not hasattr(image, "size") or not hasattr(image, "convert"):
