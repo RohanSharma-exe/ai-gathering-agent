@@ -93,6 +93,8 @@ def main() -> int:
         parser.error("--interval cannot be negative")
     if args.max_gathers is not None and args.max_gathers < 1:
         parser.error("--max-gathers must be positive")
+    if args.dismount_only and args.max_gathers is not None:
+        parser.error("--dismount-only cannot be combined with --max-gathers")
 
     desktop = Desktop(dry_run=True)
     source = AlbionScreenshotSource(desktop)
