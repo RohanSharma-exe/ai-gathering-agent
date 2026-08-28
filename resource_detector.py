@@ -182,8 +182,8 @@ class LocalResourceDetector:
             resource,
             confidence,
             BoundingBox(
-                center_x / width - (box_width / width) / 2,
-                center_y / height - (box_height / height) / 2,
+                (x_offset + min_x) / width,
+                (y_offset + min_y) / height,
                 box_width / width,
                 box_height / height,
             ),
