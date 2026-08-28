@@ -58,12 +58,7 @@ class AlbionUIObserver:
         return (not unmounted, unmounted)
 
     def _inventory_percent(self, image: object) -> float | None:
-        """Estimate the load-bar fill from a stable horizontal scanline.
-
-        The detector deliberately returns ``None`` when the configured region
-        does not contain a convincing bar. It never converts uncertainty into
-        a fake 0% or 100% value.
-        """
+        """Estimate load-bar fill using color distance from its unfilled tail."""
         width, height = image.size
         left = round(self.config.inventory_bar_x[0] * width)
         right = round(self.config.inventory_bar_x[1] * width)
@@ -71,47 +66,49 @@ class AlbionUIObserver:
         if right - left < 20 or not (0 <= center_y < height):
             return None
 
-        # Search nearby rows for the strongest horizontal bar-like contrast.
-        best: tuple[float, int] | None = None
+        best: tuple[float, float] | None = None
         for y in range(max(0, center_y - 6), min(height, center_y + 7)):
-            row = image.crop((left, y, right, y + 1)).convert("RGB").get_flattened_data()
+            row = image.crop((left, y, right + 1, y + 1)).convert("RGB").get_flattened_data()
             if len(row) < 20:
                 continue
-            # A real bar has a relatively stable right-side background and a
-            # contiguous region on the left with a different appearance.
-            split = max(5, len(row) // 5)
-            ref = row[-split:]
-            ref_luma = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in ref) / len(ref)
-            ref_sat = sum(max(r, g, b) - min(r, g, b) for r, g, b in ref) / len(ref)
-            scores = []
-            for r, g, b in row:
-                luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-                sat = max(r, g, b) - min(r, g, b)
-                scores.append(min(1.0, abs(luma - ref_luma) / 35.0 + abs(sat - ref_sat) / 55.0))
+            tail_n = max(8, len(row) // 5)
+            tail = row[-tail_n:]
+            ref = tuple(sum(p[channel] for p in tail) / len(tail) for channel in range(3))
+            distances = [sum((p[channel] - ref[channel]) ** 2 for channel in range(3)) ** 0.5 for p in row]
+            contrast = max(distances)
+            if contrast < 25:
+                continue
+
+            threshold = max(18.0, contrast * 0.30)
             prefix = 0
-            for score in scores:
-                if score < 0.45:
+            for distance in distances:
+                if distance < threshold:
                     break
                 prefix += 1
+
             if prefix < 2:
                 continue
-            # Reject a uniformly different strip: a genuine partial bar needs
-            # an unfilled tail comparable to the reference.
-            if prefix >= len(scores) - 2:
-                # It may be full, but only accept if the reference itself is
-                # sufficiently distinct from the left side.
-                left_luma = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in row[:split]) / split
-                if abs(left_luma - ref_luma) < 25:
+
+            # A genuine partial bar has a clear transition to the unfilled
+            # tail. Estimate its fill from that transition. For a full bar,
+            # require the left side to differ strongly from the right-side UI.
+            if prefix >= len(row) - 2:
+                left_mean = tuple(sum(p[channel] for p in row[:tail_n]) / tail_n for channel in range(3))
+                left_right_distance = sum((left_mean[channel] - ref[channel]) ** 2 for channel in range(3)) ** 0.5
+                if left_right_distance < 25:
                     continue
                 percent = 100.0
             else:
-                percent = prefix / len(scores) * 100.0
+                percent = prefix / len(row) * 100.0
 
-            quality = min(1.0, abs(percent - 50.0) / 50.0) + scores[min(prefix, len(scores) - 1)]
-            if best is None or quality > best[0]:
-                best = (quality, round(percent))
+            # Prefer a substantial, clean prefix over incidental UI contrast.
+            score = min(contrast / 100.0, 2.0) + min(prefix / len(row), 1.0)
+            if best is None or score > best[0]:
+                best = (score, percent)
 
-        return None if best is None else float(max(0, min(100, best[1])))
+        if best is None:
+            return None
+        return float(round(max(0.0, min(100.0, best[1]))))
 
     def _targets(self, image: object, resources: set[str] | None) -> tuple[Target, ...]:
         wanted = self._DETECTABLE_RESOURCES if resources is None else {item.strip().lower() for item in resources}
