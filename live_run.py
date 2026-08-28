@@ -51,8 +51,13 @@ def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[
         client_image = crop_albion_client(image)
         ui: UIObservation = observer.observe(client_image, resources=wanted)
         confidence = 1.0 if ui.mounted is not None else 0.0
+        # Observation currently requires a numeric inventory value. Unknown
+        # perception is therefore represented as 0 for the controller model;
+        # diagnostics retain the distinction by reading the UI observer before
+        # this conversion when needed.
+        inventory_percent = 0.0 if ui.inventory_percent is None else ui.inventory_percent
         return Observation(
-            inventory_percent=ui.inventory_percent,
+            inventory_percent=inventory_percent,
             mounted=False if ui.mounted is None else ui.mounted,
             targets=_desktop_targets(ui.targets, image),
             player_confidence=confidence,
@@ -121,8 +126,7 @@ def main() -> int:
         nonlocal frame_counter
         observation = original_observe(image)
         frame_counter += 1
-        inventory = "unknown" if observation.inventory_percent is None else f"{observation.inventory_percent:.1f}%"
-        print(f"frame={frame_counter} mounted={observation.mounted} mount_confidence={observation.mounted_confidence:.2f} inventory={inventory} targets={len(observation.targets)}", flush=True)
+        print(f"frame={frame_counter} mounted={observation.mounted} mount_confidence={observation.mounted_confidence:.2f} inventory={observation.inventory_percent:.1f}% targets={len(observation.targets)}", flush=True)
         for target in observation.targets[:5]:
             print(f"  target={target.resource} kind={target.kind.value} screen=({target.screen_x},{target.screen_y})", flush=True)
         return observation
