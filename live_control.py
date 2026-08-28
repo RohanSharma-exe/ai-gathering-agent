@@ -72,7 +72,7 @@ class LiveControlRuntime:
     def run(self) -> int:
         """Process at most ``max_frames`` observations; return frames processed."""
         frames = 0
-        mounted = False
+        dismount_requested = False
 
         while frames < self.config.max_frames:
             image = self.source.screenshot()
@@ -86,17 +86,23 @@ class LiveControlRuntime:
                 break
 
             if observation.mounted:
-                if not self.config.dismount_key:
-                    break
-                if not self._execute(
-                    Action(kind=ActionKind.PRESS_KEY, key=self.config.dismount_key)
-                ):
-                    break
-                mounted = True
+                # Request a dismount only once. Wait for a subsequent visual
+                # observation to confirm mounted=False before any gather action.
+                if not dismount_requested:
+                    if not self.config.dismount_key:
+                        break
+                    if not self._execute(
+                        Action(kind=ActionKind.PRESS_KEY, key=self.config.dismount_key)
+                    ):
+                        break
+                    dismount_requested = True
+                if self.config.gather_cooldown:
+                    self.sleep(self.config.gather_cooldown)
                 continue
 
-            if mounted:
-                mounted = False
+            # A confirmed mounted=False observation is the acknowledgement of
+            # the dismount request. Gathering is allowed only after this point.
+            dismount_requested = False
 
             target = next(
                 (
