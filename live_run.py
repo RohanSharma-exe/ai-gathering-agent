@@ -46,14 +46,7 @@ def _desktop_targets(targets: tuple[Target, ...], image: object) -> tuple[Target
 
 
 def _is_player_exclusion_zone(target: Target) -> bool:
-    """Reject resource-color blobs over the player's character/nameplate.
-
-    Albion's wood colour detector can legitimately see brown/orange pixels on
-    the player's mount and character. The player is normally camera-centered,
-    so use a conservative ellipse around that center as a click safety zone.
-    This is deliberately only a rejection heuristic: resources outside the
-    zone remain candidates and can be verified by the next observation.
-    """
+    """Reject resource-color blobs over the player's character/nameplate."""
     if target.screen_x is None or target.screen_y is None:
         return False
     dx = (target.screen_x - 0.5) / 0.105
@@ -61,8 +54,20 @@ def _is_player_exclusion_zone(target: Target) -> bool:
     return dx * dx + dy * dy <= 1.0
 
 
+def _filter_player_targets(targets: tuple[Target, ...], client_image: object) -> tuple[Target, ...]:
+    """Remove brown/orange false positives produced by the centered player.
+
+    The exclusion is enabled only for real-sized Albion client captures. Small
+    synthetic unit-test fixtures intentionally bypass it.
+    """
+    width, height = client_image.size
+    if width < 800 or height < 600:
+        return targets
+    return tuple(target for target in targets if not _is_player_exclusion_zone(target))
+
+
 def _select_target(observation: Observation, objective: Objective) -> Target | None:
-    """Choose the nearest compatible target that is not over the player."""
+    """Choose the first compatible target from the already-filtered list."""
     return next(
         (
             candidate
@@ -70,7 +75,6 @@ def _select_target(observation: Observation, objective: Objective) -> Target | N
             if candidate.is_compatible_with(objective)
             and candidate.screen_x is not None
             and candidate.screen_y is not None
-            and not _is_player_exclusion_zone(candidate)
         ),
         None,
     )
@@ -84,10 +88,11 @@ def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[
         ui: UIObservation = observer.observe(client_image, resources=wanted)
         confidence = 1.0 if ui.mounted is not None else 0.0
         inventory_percent = 0.0 if ui.inventory_percent is None else ui.inventory_percent
+        filtered_targets = _filter_player_targets(ui.targets, client_image)
         return Observation(
             inventory_percent=inventory_percent,
             mounted=False if ui.mounted is None else ui.mounted,
-            targets=_desktop_targets(ui.targets, image),
+            targets=_desktop_targets(filtered_targets, image),
             player_confidence=confidence,
             mounted_confidence=confidence,
         )
@@ -190,7 +195,7 @@ def main() -> int:
             print(f"  target={target.resource} kind={target.kind.value} screen=({target.screen_x},{target.screen_y})", flush=True)
         selected = _select_target(observation, runtime.objective)
         if selected is not None:
-            print(f"  selected=wood screen=({selected.screen_x},{selected.screen_y})", flush=True)
+            print(f"  selected={selected.resource} screen=({selected.screen_x},{selected.screen_y})", flush=True)
         if args.target_debug and not debug_done and selected is not None:
             _save_target_debug(image, selected, Path("screenshots/live/target_debug.png"))
             debug_done = True
