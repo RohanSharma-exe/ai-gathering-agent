@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 from typing import Callable
 
-from actions import ActionExecutor, PyAutoGUIExecutor
+from actions import Action, ActionExecutor, PyAutoGUIExecutor
 from albion_perception import AlbionUIObserver
 from desktop import Desktop
 from live_control import LiveControlConfig, LiveControlRuntime
@@ -88,6 +88,18 @@ def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[
     return observer, observe
 
 
+def _print_dry_run_action(action: Action) -> None:
+    """Print an action that would be sent without sending desktop input."""
+    details = [f"action={action.kind.value}"]
+    if action.target_id is not None:
+        details.append(f"target={action.target_id}")
+    if action.x is not None and action.y is not None:
+        details.append(f"x={action.x} y={action.y}")
+    if action.key is not None:
+        details.append(f"key={action.key}")
+    print(" ".join(details))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the guarded Albion gathering controller")
     parser.add_argument("--resource", default="wood", help="resource to gather")
@@ -102,11 +114,9 @@ def main() -> int:
     if args.interval < 0:
         parser.error("--interval cannot be negative")
 
-    # Desktop screenshots are always taken without desktop input here.
     desktop = Desktop(dry_run=True)
     source = AlbionScreenshotSource(desktop)
     _, observe = observe_factory(args.resource)
-
     executor: ActionExecutor = PyAutoGUIExecutor(dry_run=not args.live)
     config = LiveControlConfig(
         max_frames=args.frames,
@@ -130,6 +140,17 @@ def main() -> int:
         objective=Objective(args.resource),
         config=config,
     )
+
+    original_execute = runtime._execute
+    frame_counter = 0
+
+    def diagnostic_execute(action: Action) -> bool:
+        nonlocal frame_counter
+        if config.dry_run:
+            _print_dry_run_action(action)
+        return original_execute(action)
+
+    runtime._execute = diagnostic_execute
     processed = runtime.run()
     print(f"stopped after {processed} frame(s)")
     return 0
