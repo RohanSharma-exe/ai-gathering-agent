@@ -19,13 +19,31 @@ from runtime import ObservationRuntime, RuntimeConfig
 _observer = AlbionUIObserver()
 
 
+def _find_albion_window() -> int | None:
+    if not hasattr(ctypes, "windll"):
+        return None
+    hwnd = ctypes.windll.user32.FindWindowW(None, "Albion Online Client")
+    return int(hwnd) if hwnd else None
+
+
+def activate_albion_window() -> bool:
+    """Bring the Albion client to the foreground on Windows."""
+    hwnd = _find_albion_window()
+    if hwnd is None:
+        return False
+    user32 = ctypes.windll.user32
+    # SW_RESTORE = 9. Restoring first also handles a minimized Albion window.
+    user32.ShowWindow(hwnd, 9)
+    return bool(user32.SetForegroundWindow(hwnd))
+
+
 def albion_client_rect() -> tuple[int, int, int, int] | None:
     """Return the Albion client-area rectangle on Windows, if visible."""
     if not hasattr(ctypes, "windll"):
         return None
 
     user32 = ctypes.windll.user32
-    hwnd = user32.FindWindowW(None, "Albion Online Client")
+    hwnd = _find_albion_window()
     if not hwnd:
         return None
 
