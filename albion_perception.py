@@ -1,16 +1,18 @@
 """Fast, local visual cues for the Albion Online client.
 
 This module deliberately uses only Pillow. It does not send mouse or keyboard
-input and does not attempt semantic game understanding. The first live pass
-focuses on the three cues the controller needs immediately: mounted state,
-usable unmounted skills, and visible inventory load.
+input. The live pass extracts mounted state, usable unmounted skills, visible
+inventory load, and conservative resource candidates for the controller.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import hypot
 
 from observation import UIObservation
+from resource_detector import LocalResourceDetector
+from state import Target, TargetKind
 
 
 @dataclass(frozen=True)
@@ -38,8 +40,15 @@ class AlbionPerceptionConfig:
 class AlbionUIObserver:
     """Extract conservative Albion UI state from one game-client image."""
 
-    def __init__(self, config: AlbionPerceptionConfig | None = None) -> None:
+    _DETECTABLE_RESOURCES = frozenset({"wood", "fiber", "leather"})
+
+    def __init__(
+        self,
+        config: AlbionPerceptionConfig | None = None,
+        resource_detector: LocalResourceDetector | None = None,
+    ) -> None:
         self.config = config or AlbionPerceptionConfig()
+        self.resource_detector = resource_detector or LocalResourceDetector()
 
     @staticmethod
     def _mean_saturation(image: object, box: tuple[int, int, int, int]) -> float:
@@ -109,7 +118,41 @@ class AlbionUIObserver:
                     return float(round(max(0.0, min(100.0, dark_fraction * 100.0))))
         return None
 
-    def observe(self, image: object) -> UIObservation:
+    def _targets(
+        self,
+        image: object,
+        resources: set[str] | None,
+    ) -> tuple[Target, ...]:
+        wanted = self._DETECTABLE_RESOURCES if resources is None else {
+            item.strip().lower() for item in resources
+        }
+        wanted &= self._DETECTABLE_RESOURCES
+        if not wanted:
+            return ()
+
+        detections = self.resource_detector.detect(image, resources=wanted)
+        targets = []
+        for detection in detections:
+            screen_x = detection.box.x + detection.box.width / 2
+            screen_y = detection.box.y + detection.box.height / 2
+            distance = hypot(screen_x - 0.5, screen_y - 0.5)
+            targets.append(
+                Target(
+                    TargetKind.RESOURCE,
+                    detection.label,
+                    distance,
+                    screen_x,
+                    screen_y,
+                )
+            )
+        return tuple(sorted(targets, key=lambda target: target.distance))
+
+    def observe(
+        self,
+        image: object,
+        *,
+        resources: set[str] | None = None,
+    ) -> UIObservation:
         if not hasattr(image, "size") or not hasattr(image, "convert"):
             raise TypeError("image must be Pillow-compatible")
 
@@ -121,4 +164,5 @@ class AlbionUIObserver:
             city_present=False,
             chest_present=False,
             skills_visible=skills_visible,
+            targets=self._targets(rgb, resources),
         )
