@@ -18,10 +18,8 @@ from vision import Observation
 
 class AlbionScreenshotSource:
     """Screenshot adapter that captures the desktop only in memory."""
-
     def __init__(self, desktop: Desktop) -> None:
         self.desktop = desktop
-
     def screenshot(self):
         return self.desktop.screenshot()
 
@@ -32,8 +30,7 @@ def _desktop_targets(targets: tuple[Target, ...], image: object) -> tuple[Target
         return targets
     left, top, right, bottom = rect
     screen_width, screen_height = image.size
-    client_width = right - left
-    client_height = bottom - top
+    client_width, client_height = right - left, bottom - top
     if client_width <= 0 or client_height <= 0:
         return ()
     mapped: list[Target] = []
@@ -50,19 +47,17 @@ def _desktop_targets(targets: tuple[Target, ...], image: object) -> tuple[Target
 def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[[object], Observation]]:
     observer = AlbionUIObserver()
     wanted = {resource.strip().lower()}
-
     def observe(image: object) -> Observation:
         client_image = crop_albion_client(image)
         ui: UIObservation = observer.observe(client_image, resources=wanted)
         confidence = 1.0 if ui.mounted is not None else 0.0
         return Observation(
-            inventory_percent=0.0 if ui.inventory_percent is None else ui.inventory_percent,
+            inventory_percent=ui.inventory_percent,
             mounted=False if ui.mounted is None else ui.mounted,
             targets=_desktop_targets(ui.targets, image),
             player_confidence=confidence,
             mounted_confidence=confidence,
         )
-
     return observer, observe
 
 
@@ -79,15 +74,14 @@ def _print_action(action: Action, dry_run: bool) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the guarded Albion gathering controller")
-    parser.add_argument("--resource", default="wood", help="resource to gather")
-    parser.add_argument("--frames", type=int, default=5, help="maximum observation frames")
-    parser.add_argument("--interval", type=float, default=0.5, help="seconds between frames")
-    parser.add_argument("--dismount-key", default="a", help="key used to mount/dismount")
-    parser.add_argument("--max-gathers", type=int, default=None, help="stop after this many gather actions")
-    parser.add_argument("--dismount-only", action="store_true", help="test dismounting only; never gather")
+    parser.add_argument("--resource", default="wood")
+    parser.add_argument("--frames", type=int, default=5)
+    parser.add_argument("--interval", type=float, default=0.5)
+    parser.add_argument("--dismount-key", default="a")
+    parser.add_argument("--max-gathers", type=int, default=None)
+    parser.add_argument("--dismount-only", action="store_true")
     parser.add_argument("--live", action="store_true", help="ENABLE real mouse/keyboard input")
     args = parser.parse_args()
-
     if args.frames < 1:
         parser.error("--frames must be positive")
     if args.interval < 0:
@@ -101,14 +95,7 @@ def main() -> int:
     source = AlbionScreenshotSource(desktop)
     _, observe = observe_factory(args.resource)
     executor: ActionExecutor = PyAutoGUIExecutor(dry_run=not args.live)
-    config = LiveControlConfig(
-        max_frames=args.frames,
-        dry_run=not args.live,
-        dismount_key=args.dismount_key,
-        gather_cooldown=args.interval,
-        max_gathers=args.max_gathers,
-        dismount_only=args.dismount_only,
-    )
+    config = LiveControlConfig(max_frames=args.frames, dry_run=not args.live, dismount_key=args.dismount_key, gather_cooldown=args.interval, max_gathers=args.max_gathers, dismount_only=args.dismount_only)
 
     print("=== Albion Gathering Agent ===")
     print(f"mode={'LIVE INPUT ENABLED' if args.live else 'DRY-RUN (no input)'}")
@@ -134,26 +121,16 @@ def main() -> int:
         nonlocal frame_counter
         observation = original_observe(image)
         frame_counter += 1
-        print(
-            f"frame={frame_counter} mounted={observation.mounted} "
-            f"mount_confidence={observation.mounted_confidence:.2f} "
-            f"inventory={observation.inventory_percent:.1f}% "
-            f"targets={len(observation.targets)}",
-            flush=True,
-        )
+        inventory = "unknown" if observation.inventory_percent is None else f"{observation.inventory_percent:.1f}%"
+        print(f"frame={frame_counter} mounted={observation.mounted} mount_confidence={observation.mounted_confidence:.2f} inventory={inventory} targets={len(observation.targets)}", flush=True)
         for target in observation.targets[:5]:
-            print(
-                f"  target={target.resource} kind={target.kind.value} "
-                f"screen=({target.screen_x},{target.screen_y})",
-                flush=True,
-            )
+            print(f"  target={target.resource} kind={target.kind.value} screen=({target.screen_x},{target.screen_y})", flush=True)
         return observation
 
     def diagnostic_execute(action: Action) -> bool:
         _print_action(action, config.dry_run)
-        if config.dry_run:
-            return original_execute(action)
-        print("  input sent; re-observing before any further action", flush=True)
+        if not config.dry_run:
+            print("  input sent; re-observing before any further action", flush=True)
         return original_execute(action)
 
     runtime.observe = diagnostic_observe
