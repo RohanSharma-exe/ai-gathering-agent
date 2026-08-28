@@ -15,16 +15,9 @@ class AlbionPerceptionConfig:
     """Normalized regions for the current Albion 4:3 client layout."""
 
     skill_centers: tuple[tuple[float, float], ...] = (
-        (0.282, 0.961),
-        (0.330, 0.961),
-        (0.381, 0.961),
-        (0.434, 0.961),
-        (0.483, 0.961),
-        (0.535, 0.961),
-        (0.584, 0.961),
-        (0.633, 0.961),
-        (0.683, 0.961),
-        (0.735, 0.961),
+        (0.282, 0.961), (0.330, 0.961), (0.381, 0.961), (0.434, 0.961),
+        (0.483, 0.961), (0.535, 0.961), (0.584, 0.961), (0.633, 0.961),
+        (0.683, 0.961), (0.735, 0.961),
     )
     inventory_bar_x: tuple[float, float] = (0.742, 0.950)
     inventory_bar_y: float = 0.454
@@ -37,11 +30,7 @@ class AlbionUIObserver:
 
     _DETECTABLE_RESOURCES = frozenset({"wood", "fiber", "leather"})
 
-    def __init__(
-        self,
-        config: AlbionPerceptionConfig | None = None,
-        resource_detector: LocalResourceDetector | None = None,
-    ) -> None:
+    def __init__(self, config: AlbionPerceptionConfig | None = None, resource_detector: LocalResourceDetector | None = None) -> None:
         self.config = config or AlbionPerceptionConfig()
         self.resource_detector = resource_detector or LocalResourceDetector()
 
@@ -58,139 +47,89 @@ class AlbionUIObserver:
         width, height = image.size
         radius = max(3, round(min(width, height) * 0.012))
         saturation = []
-
         for normalized_x, normalized_y in self.config.skill_centers:
             center_x = round(normalized_x * width)
             center_y = round(normalized_y * height)
-            box = (
-                max(0, center_x - radius),
-                max(0, center_y - radius),
-                min(width, center_x + radius + 1),
-                min(height, center_y + radius + 1),
-            )
+            box = (max(0, center_x - radius), max(0, center_y - radius), min(width, center_x + radius + 1), min(height, center_y + radius + 1))
             saturation.append(self._mean_saturation(image, box))
-
         usable_slots = saturation[1:8]
-        colored_slots = sum(
-            value >= self.config.colored_skill_threshold for value in usable_slots
-        )
+        colored_slots = sum(value >= self.config.colored_skill_threshold for value in usable_slots)
         unmounted = colored_slots >= self.config.unmounted_slot_count
         return (not unmounted, unmounted)
 
     def _inventory_percent(self, image: object) -> float | None:
-        """Estimate the load-bar fill without treating an unrelated strip as full."""
+        """Estimate the load-bar fill from a stable horizontal scanline.
+
+        The detector deliberately returns ``None`` when the configured region
+        does not contain a convincing bar. It never converts uncertainty into
+        a fake 0% or 100% value.
+        """
         width, height = image.size
         left = round(self.config.inventory_bar_x[0] * width)
         right = round(self.config.inventory_bar_x[1] * width)
         center_y = round(self.config.inventory_bar_y * height)
-        if right - left < 20:
+        if right - left < 20 or not (0 <= center_y < height):
             return None
 
-        # Prefer a row between two dark horizontal borders. Some client/UI
-        # scaling modes make those borders only one pixel thick, so fall back
-        # to the configured center row when a border pair is not recoverable.
-        rows: list[tuple[int, float]] = []
-        for y in range(max(0, center_y - 7), min(height, center_y + 8)):
-            pixels = image.crop((left, y, right + 1, y + 1)).convert("RGB").get_flattened_data()
-            if not pixels:
+        # Search nearby rows for the strongest horizontal bar-like contrast.
+        best: tuple[float, int] | None = None
+        for y in range(max(0, center_y - 6), min(height, center_y + 7)):
+            row = image.crop((left, y, right, y + 1)).convert("RGB").get_flattened_data()
+            if len(row) < 20:
                 continue
-            dark_fraction = sum(
-                0.2126 * r + 0.7152 * g + 0.0722 * b < 125
-                for r, g, b in pixels
-            ) / len(pixels)
-            rows.append((y, dark_fraction))
+            # A real bar has a relatively stable right-side background and a
+            # contiguous region on the left with a different appearance.
+            split = max(5, len(row) // 5)
+            ref = row[-split:]
+            ref_luma = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in ref) / len(ref)
+            ref_sat = sum(max(r, g, b) - min(r, g, b) for r, g, b in ref) / len(ref)
+            scores = []
+            for r, g, b in row:
+                luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                sat = max(r, g, b) - min(r, g, b)
+                scores.append(min(1.0, abs(luma - ref_luma) / 35.0 + abs(sat - ref_sat) / 55.0))
+            prefix = 0
+            for score in scores:
+                if score < 0.45:
+                    break
+                prefix += 1
+            if prefix < 2:
+                continue
+            # Reject a uniformly different strip: a genuine partial bar needs
+            # an unfilled tail comparable to the reference.
+            if prefix >= len(scores) - 2:
+                # It may be full, but only accept if the reference itself is
+                # sufficiently distinct from the left side.
+                left_luma = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in row[:split]) / split
+                if abs(left_luma - ref_luma) < 25:
+                    continue
+                percent = 100.0
+            else:
+                percent = prefix / len(scores) * 100.0
 
-        inner_y = center_y
-        border_rows = [y for y, fraction in rows if fraction >= 0.80]
-        for index, top in enumerate(border_rows):
-            bottom = next((candidate for candidate in border_rows[index + 1 :] if 2 <= candidate - top <= 6), None)
-            if bottom is not None:
-                inner_y = (top + bottom) // 2
-                break
+            quality = min(1.0, abs(percent - 50.0) / 50.0) + scores[min(prefix, len(scores) - 1)]
+            if best is None or quality > best[0]:
+                best = (quality, round(percent))
 
-        pixels = image.crop((left + 2, inner_y, right - 1, inner_y + 1)).convert("RGB").get_flattened_data()
-        if len(pixels) < 20:
-            return None
+        return None if best is None else float(max(0, min(100, best[1])))
 
-        # Compare each position with the rightmost portion of the same row,
-        # which is normally the unfilled background. This works across UI
-        # themes better than assuming one exact fill color.
-        split = max(5, len(pixels) // 5)
-        reference = pixels[-split:]
-        ref_luma = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in reference) / len(reference)
-        ref_sat = sum(max(r, g, b) - min(r, g, b) for r, g, b in reference) / len(reference)
-
-        filled: list[bool] = []
-        for r, g, b in pixels:
-            luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-            sat = max(r, g, b) - min(r, g, b)
-            filled.append((ref_luma - luma) >= 15 or abs(sat - ref_sat) >= 20)
-
-        # The fill must begin at the left and remain contiguous. If there is
-        # no credible filled prefix, report unknown rather than 0/100.
-        contiguous = 0
-        for value in filled:
-            if not value:
-                break
-            contiguous += 1
-
-        if contiguous == 0:
-            # A completely filled bar has no unfilled tail; only accept it if
-            # the left and right samples are materially different from the
-            # surrounding row rather than blindly returning 100%.
-            left_luma = sum(
-                0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in pixels[:split]
-            ) / split
-            if ref_luma - left_luma >= 15:
-                return 100.0
-            return None
-
-        # Reject noisy/non-bar rows with filled pixels reappearing after the
-        # first unfilled region.
-        if any(filled[contiguous + 3 :]):
-            return None
-
-        percent = contiguous / len(filled) * 100.0
-        return float(round(max(0.0, min(100.0, percent))))
-
-    def _targets(
-        self,
-        image: object,
-        resources: set[str] | None,
-    ) -> tuple[Target, ...]:
-        wanted = self._DETECTABLE_RESOURCES if resources is None else {
-            item.strip().lower() for item in resources
-        }
+    def _targets(self, image: object, resources: set[str] | None) -> tuple[Target, ...]:
+        wanted = self._DETECTABLE_RESOURCES if resources is None else {item.strip().lower() for item in resources}
         wanted &= self._DETECTABLE_RESOURCES
         if not wanted:
             return ()
-
         detections = self.resource_detector.detect(image, resources=wanted)
         targets = []
         for detection in detections:
             screen_x = detection.box.x + detection.box.width / 2
             screen_y = detection.box.y + detection.box.height / 2
             distance = hypot(screen_x - 0.5, screen_y - 0.5)
-            targets.append(
-                Target(
-                    TargetKind.RESOURCE,
-                    detection.label,
-                    distance,
-                    screen_x,
-                    screen_y,
-                )
-            )
+            targets.append(Target(TargetKind.RESOURCE, detection.label, distance, screen_x, screen_y))
         return tuple(sorted(targets, key=lambda target: target.distance))
 
-    def observe(
-        self,
-        image: object,
-        *,
-        resources: set[str] | None = None,
-    ) -> UIObservation:
+    def observe(self, image: object, *, resources: set[str] | None = None) -> UIObservation:
         if not hasattr(image, "size") or not hasattr(image, "convert"):
             raise TypeError("image must be Pillow-compatible")
-
         rgb = image.convert("RGB")
         mounted, skills_visible = self._skill_state(rgb)
         return UIObservation(
