@@ -85,6 +85,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Observe the desktop without controlling it")
     parser.add_argument("--frames", type=int, default=5, help="number of screenshots to capture")
     parser.add_argument("--interval", type=float, default=0.5, help="seconds between screenshots")
+    parser.add_argument(
+        "--save-frames",
+        action="store_true",
+        help="persist captured frames for debugging (off by default)",
+    )
     parser.add_argument("--output", type=Path, default=Path("screenshots/live"))
     args = parser.parse_args()
 
@@ -94,12 +99,15 @@ def main() -> int:
         RuntimeConfig(
             interval_seconds=args.interval,
             max_frames=args.frames,
-            save_frames=True,
+            save_frames=args.save_frames,
             output_dir=args.output,
         ),
     )
     print("Observation-only mode: no mouse or keyboard input will be sent.")
-    print(f"Saving frames to: {args.output.resolve()}")
+    if args.save_frames:
+        print(f"Saving frames to: {args.output.resolve()}")
+    else:
+        print("Frame saving disabled; screenshots remain in memory only.")
     runtime.run(describe)
     return 0
 
