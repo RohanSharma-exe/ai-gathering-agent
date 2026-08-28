@@ -17,11 +17,37 @@ from runtime import ObservationRuntime, RuntimeConfig
 
 
 _observer = AlbionUIObserver()
+_dpi_awareness_initialized = False
+
+
+def _ensure_dpi_awareness() -> None:
+    """Make Win32 window coordinates use the same physical pixels as screenshots.
+
+    PyAutoGUI/Pillow screenshots are physical screen pixels. If the Python
+    process is DPI-virtualized, GetClientRect/ClientToScreen can instead report
+    logical coordinates, producing a consistent offset/scale error when those
+    coordinates are used for mouse clicks. Albion is commonly run on a scaled
+    Windows desktop, so opt this process into physical-pixel coordinates before
+    querying the window.
+    """
+    global _dpi_awareness_initialized
+    if _dpi_awareness_initialized or not hasattr(ctypes, "windll"):
+        return
+
+    user32 = ctypes.windll.user32
+    try:
+        # Available on supported Windows versions and sufficient for this
+        # single-monitor/local-client calibration path.
+        user32.SetProcessDPIAware()
+    except (AttributeError, OSError):
+        pass
+    _dpi_awareness_initialized = True
 
 
 def _find_albion_window() -> int | None:
     if not hasattr(ctypes, "windll"):
         return None
+    _ensure_dpi_awareness()
     hwnd = ctypes.windll.user32.FindWindowW(None, "Albion Online Client")
     return int(hwnd) if hwnd else None
 
@@ -42,6 +68,7 @@ def albion_client_rect() -> tuple[int, int, int, int] | None:
     if not hasattr(ctypes, "windll"):
         return None
 
+    _ensure_dpi_awareness()
     user32 = ctypes.windll.user32
     hwnd = _find_albion_window()
     if not hwnd:
