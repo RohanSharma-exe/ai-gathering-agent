@@ -7,6 +7,7 @@ from time import sleep as default_sleep
 from typing import Callable, Protocol
 
 from actions import Action, ActionExecutor, ActionKind
+from config import DEFAULT_INVENTORY_RETURN_THRESHOLD
 from state import Objective
 from vision import Observation
 
@@ -25,6 +26,7 @@ class LiveControlConfig:
     dismount_key: str | None = "a"
     gather_cooldown: float = 0.25
     min_mount_confidence: float = 0.8
+    inventory_return_threshold: float = DEFAULT_INVENTORY_RETURN_THRESHOLD
 
     def __post_init__(self) -> None:
         if self.max_frames < 1:
@@ -33,6 +35,8 @@ class LiveControlConfig:
             raise ValueError("min_mount_confidence must be between 0 and 1")
         if self.gather_cooldown < 0:
             raise ValueError("gather_cooldown cannot be negative")
+        if not 0 <= self.inventory_return_threshold <= 100:
+            raise ValueError("inventory_return_threshold must be between 0 and 100")
 
 
 class LiveControlRuntime:
@@ -40,7 +44,8 @@ class LiveControlRuntime:
 
     The runtime deliberately does not navigate blindly. It only gathers a
     compatible visible target after confirming the player is dismounted, and it
-    stops immediately if an input is rejected or a required state is uncertain.
+    stops immediately if an input is rejected, capacity is high, or a required
+    state is uncertain.
     """
 
     def __init__(
@@ -75,6 +80,9 @@ class LiveControlRuntime:
             frames += 1
 
             if observation.mounted_confidence < self.config.min_mount_confidence:
+                break
+
+            if observation.inventory_percent >= self.config.inventory_return_threshold:
                 break
 
             if observation.mounted:
