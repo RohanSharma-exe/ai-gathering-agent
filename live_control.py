@@ -28,6 +28,7 @@ class LiveControlConfig:
     min_mount_confidence: float = 0.8
     inventory_return_threshold: float = DEFAULT_INVENTORY_RETURN_THRESHOLD
     max_gathers: int | None = None
+    dismount_only: bool = False
 
     def __post_init__(self) -> None:
         if self.max_frames < 1:
@@ -45,15 +46,7 @@ class LiveControlConfig:
 class LiveControlRuntime:
     """Observe the game and execute only conservative, verified actions."""
 
-    def __init__(
-        self,
-        source: ScreenshotSource,
-        observe: Callable[[object], Observation],
-        executor: ActionExecutor,
-        objective: Objective,
-        config: LiveControlConfig | None = None,
-        sleep: Callable[[float], None] = default_sleep,
-    ) -> None:
+    def __init__(self, source: ScreenshotSource, observe: Callable[[object], Observation], executor: ActionExecutor, objective: Objective, config: LiveControlConfig | None = None, sleep: Callable[[float], None] = default_sleep) -> None:
         self.source = source
         self.observe = observe
         self.executor = executor
@@ -67,7 +60,6 @@ class LiveControlRuntime:
         return self.executor.execute(action).accepted
 
     def run(self) -> int:
-        """Process at most ``max_frames`` observations; return frames processed."""
         frames = 0
         dismount_requested = False
         gathers = 0
@@ -79,7 +71,6 @@ class LiveControlRuntime:
 
             if observation.mounted_confidence < self.config.min_mount_confidence:
                 break
-
             if observation.inventory_percent >= self.config.inventory_return_threshold:
                 break
 
@@ -87,9 +78,7 @@ class LiveControlRuntime:
                 if not dismount_requested:
                     if not self.config.dismount_key:
                         break
-                    if not self._execute(
-                        Action(kind=ActionKind.PRESS_KEY, key=self.config.dismount_key)
-                    ):
+                    if not self._execute(Action(kind=ActionKind.PRESS_KEY, key=self.config.dismount_key)):
                         break
                     dismount_requested = True
                 if self.config.gather_cooldown:
@@ -97,20 +86,12 @@ class LiveControlRuntime:
                 continue
 
             dismount_requested = False
-
+            if self.config.dismount_only:
+                break
             if self.config.max_gathers is not None and gathers >= self.config.max_gathers:
                 break
 
-            target = next(
-                (
-                    candidate
-                    for candidate in observation.targets
-                    if candidate.is_compatible_with(self.objective)
-                    and candidate.screen_x is not None
-                    and candidate.screen_y is not None
-                ),
-                None,
-            )
+            target = next((candidate for candidate in observation.targets if candidate.is_compatible_with(self.objective) and candidate.screen_x is not None and candidate.screen_y is not None), None)
             if target is None:
                 continue
 
