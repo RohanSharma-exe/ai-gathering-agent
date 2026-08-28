@@ -56,22 +56,28 @@ def _albion_client_rect() -> tuple[int, int, int, int] | None:
     return left, top, right, bottom
 
 
-def observe_frame(image: object) -> UIObservation:
-    """Interpret the Albion client portion of one desktop screenshot."""
+def crop_albion_client(image: object) -> object:
+    """Crop a desktop screenshot to the Albion client area when detectable."""
     if not hasattr(image, "size") or not hasattr(image, "crop"):
         raise TypeError("expected a Pillow-compatible screenshot image")
 
     rect = _albion_client_rect()
-    if rect is not None:
-        left, top, right, bottom = rect
-        screen_width, screen_height = image.size
-        left = max(0, min(left, screen_width - 1))
-        top = max(0, min(top, screen_height - 1))
-        right = max(left + 1, min(right, screen_width))
-        bottom = max(top + 1, min(bottom, screen_height))
-        image = image.crop((left, top, right, bottom))
+    if rect is None:
+        return image
 
-    return _observer.observe(image)
+    left, top, right, bottom = rect
+    screen_width, screen_height = image.size
+    left = max(0, min(left, screen_width - 1))
+    top = max(0, min(top, screen_height - 1))
+    right = max(left + 1, min(right, screen_width))
+    bottom = max(top + 1, min(bottom, screen_height))
+    return image.crop((left, top, right, bottom))
+
+
+def observe_frame(image: object, resources: set[str] | None = None) -> UIObservation:
+    """Interpret the Albion client portion of one desktop screenshot."""
+    client_image = crop_albion_client(image)
+    return _observer.observe(client_image, resources=resources)
 
 
 def describe(frame: object) -> None:
