@@ -45,6 +45,37 @@ def _desktop_targets(targets: tuple[Target, ...], image: object) -> tuple[Target
     return tuple(mapped)
 
 
+def _is_player_exclusion_zone(target: Target) -> bool:
+    """Reject resource-color blobs over the player's character/nameplate.
+
+    Albion's wood colour detector can legitimately see brown/orange pixels on
+    the player's mount and character. The player is normally camera-centered,
+    so use a conservative ellipse around that center as a click safety zone.
+    This is deliberately only a rejection heuristic: resources outside the
+    zone remain candidates and can be verified by the next observation.
+    """
+    if target.screen_x is None or target.screen_y is None:
+        return False
+    dx = (target.screen_x - 0.5) / 0.105
+    dy = (target.screen_y - 0.47) / 0.14
+    return dx * dx + dy * dy <= 1.0
+
+
+def _select_target(observation: Observation, objective: Objective) -> Target | None:
+    """Choose the nearest compatible target that is not over the player."""
+    return next(
+        (
+            candidate
+            for candidate in observation.targets
+            if candidate.is_compatible_with(objective)
+            and candidate.screen_x is not None
+            and candidate.screen_y is not None
+            and not _is_player_exclusion_zone(candidate)
+        ),
+        None,
+    )
+
+
 def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[[object], Observation]]:
     observer = AlbionUIObserver()
     wanted = {resource.strip().lower()}
@@ -157,8 +188,11 @@ def main() -> int:
         print(f"frame={frame_counter} mounted={observation.mounted} mount_confidence={observation.mounted_confidence:.2f} inventory={observation.inventory_percent:.1f}% targets={len(observation.targets)}", flush=True)
         for target in observation.targets[:5]:
             print(f"  target={target.resource} kind={target.kind.value} screen=({target.screen_x},{target.screen_y})", flush=True)
-        if args.target_debug and not debug_done and observation.targets:
-            _save_target_debug(image, observation.targets[0], Path("screenshots/live/target_debug.png"))
+        selected = _select_target(observation, runtime.objective)
+        if selected is not None:
+            print(f"  selected=wood screen=({selected.screen_x},{selected.screen_y})", flush=True)
+        if args.target_debug and not debug_done and selected is not None:
+            _save_target_debug(image, selected, Path("screenshots/live/target_debug.png"))
             debug_done = True
         return observation
 
