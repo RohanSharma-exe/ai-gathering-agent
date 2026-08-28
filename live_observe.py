@@ -19,7 +19,7 @@ from runtime import ObservationRuntime, RuntimeConfig
 _observer = AlbionUIObserver()
 
 
-def _albion_client_rect() -> tuple[int, int, int, int] | None:
+def albion_client_rect() -> tuple[int, int, int, int] | None:
     """Return the Albion client-area rectangle on Windows, if visible."""
     if not hasattr(ctypes, "windll"):
         return None
@@ -61,7 +61,7 @@ def crop_albion_client(image: object) -> object:
     if not hasattr(image, "size") or not hasattr(image, "crop"):
         raise TypeError("expected a Pillow-compatible screenshot image")
 
-    rect = _albion_client_rect()
+    rect = albion_client_rect()
     if rect is None:
         return image
 
