@@ -11,15 +11,16 @@ The runner is deliberately conservative:
 from __future__ import annotations
 
 import argparse
+from math import hypot
 from typing import Callable
 
 from actions import ActionExecutor, PyAutoGUIExecutor
 from albion_perception import AlbionUIObserver
 from desktop import Desktop
 from live_control import LiveControlConfig, LiveControlRuntime
-from live_observe import crop_albion_client
+from live_observe import albion_client_rect, crop_albion_client
 from observation import UIObservation
-from state import Objective
+from state import Objective, Target, TargetKind
 from vision import Observation
 
 
@@ -31,6 +32,41 @@ class AlbionScreenshotSource:
 
     def screenshot(self):
         return self.desktop.screenshot()
+
+
+def _desktop_targets(
+    targets: tuple[Target, ...],
+    image: object,
+) -> tuple[Target, ...]:
+    """Convert client-relative target coordinates into desktop coordinates."""
+    rect = albion_client_rect()
+    if rect is None:
+        return targets
+
+    left, top, right, bottom = rect
+    screen_width, screen_height = image.size
+    client_width = right - left
+    client_height = bottom - top
+    if client_width <= 0 or client_height <= 0:
+        return ()
+
+    mapped: list[Target] = []
+    for target in targets:
+        if target.screen_x is None or target.screen_y is None:
+            mapped.append(target)
+            continue
+        screen_x = (left + target.screen_x * client_width) / screen_width
+        screen_y = (top + target.screen_y * client_height) / screen_height
+        mapped.append(
+            Target(
+                TargetKind.RESOURCE,
+                target.resource,
+                target.distance,
+                max(0.0, min(1.0, screen_x)),
+                max(0.0, min(1.0, screen_y)),
+            )
+        )
+    return tuple(mapped)
 
 
 def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[[object], Observation]]:
@@ -45,7 +81,7 @@ def observe_factory(resource: str = "wood") -> tuple[AlbionUIObserver, Callable[
         return Observation(
             inventory_percent=0.0 if ui.inventory_percent is None else ui.inventory_percent,
             mounted=False if ui.mounted is None else ui.mounted,
-            targets=ui.targets,
+            targets=_desktop_targets(ui.targets, image),
             player_confidence=confidence,
             mounted_confidence=confidence,
         )
